@@ -34,6 +34,7 @@
 #include "task_adc.h"    // 引入 ADC 业务
 #include "task_sht30.h"   // SHT30 温湿度采集
 #include "task_exv.h"     // 电子膨胀阀测试
+#include "task_temp_ctrl.h" // 温度控制流程 (逻辑图1)
 #include "bsp_i2c_mutex.h" // I2C1 总线互斥锁
 #include "sys_state.h"    // 引入系统状态头文件
 /* USER CODE END Includes */
@@ -63,6 +64,7 @@ osThreadId TaskPanelHandle;
 osThreadId Task_ADCHandle;
 osThreadId Task_SHT30Handle;
 osThreadId Task_EXVHandle;
+osThreadId Task_TempCtrlHandle;
 osMutexId EEPROM_MutexHandle;
 
 /* Private function prototypes -----------------------------------------------*/
@@ -76,6 +78,7 @@ void StartTask03(void const * argument);
 void StartTask_ADC(void const * argument);
 void StartTask_SHT30(void const * argument);
 void StartTask_EXV(void const * argument);
+void StartTask_TempCtrl(void const * argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -151,6 +154,10 @@ void MX_FREERTOS_Init(void) {
   /* 电子膨胀阀测试任务 (普通优先级, 256字栈) */
   osThreadDef(Task_EXV, StartTask_EXV, osPriorityNormal, 0, 256);
   Task_EXVHandle = osThreadCreate(osThread(Task_EXV), NULL);
+
+  /* 温度控制流程任务 (逻辑图1, 普通优先级, 512栈) */
+  osThreadDef(Task_TempCtrl, StartTask_TempCtrl, osPriorityNormal, 0, 512);
+  Task_TempCtrlHandle = osThreadCreate(osThread(Task_TempCtrl), NULL);
   /* USER CODE END RTOS_THREADS */
 
 }
@@ -248,6 +255,11 @@ void StartTask_SHT30(void const * argument)
 void StartTask_EXV(void const * argument)
 {
   Task_EXV_Process(argument);
+  for(;;) { osDelay(1); }
+}
+void StartTask_TempCtrl(void const * argument)
+{
+  Task_TempCtrl_Process(argument);
   for(;;) { osDelay(1); }
 }
 /* USER CODE END Application */
