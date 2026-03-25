@@ -15,6 +15,7 @@
  *   2. TempCtrl_CompressorStart()  压缩机开机逻辑
  *   3. TempCtrl_OilHeatControl()   油壳加热逻辑
  *   4. TempCtrl_AlarmProcess()     告警(温度压力)处理逻辑
+ *   5. TempCtrl_MainLogic()        温度逻辑(主逻辑)
  * =========================================================================== */
 
 /* ===================================================================
@@ -99,6 +100,37 @@ static void NotifyUser(uint32_t alarm_code)
      * 可通过面板显示故障码 / 蜂鸣器报警 / RS485上报
      */
     (void)alarm_code;
+}
+
+/* --- 蒸发风扇关闭 (逻辑图3实现, 此处为桩) --- */
+static void EvapFan_AllOff(void)
+{
+    /* TODO: 逻辑图3(风机流程)实现后替换
+     * 关闭所有蒸发风扇
+     */
+    xEventGroupClearBits(SysEventGroup, ST_EVAP_FAN_ON);
+}
+
+/* --- 冷凝风扇关闭 (逻辑图6实现, 此处为桩) --- */
+static void CondFan_AllOff(void)
+{
+    /* TODO: 逻辑图6(冷凝风机流程)实现后替换
+     * 关闭所有冷凝风扇
+     */
+    xEventGroupClearBits(SysEventGroup,
+        ST_COND_FAN1_ON | ST_COND_FAN2_ON | ST_COND_FAN3_ON);
+}
+
+/* --- 柜温传感器有效性判断 ---
+ * 返回: true = 正常, false = 故障(开路/短路/超量程)
+ */
+static bool CabinetSensor_IsValid(float tc)
+{
+    /* TODO: 根据实际传感器特性确认合理范围
+     * 当前: -50℃ ~ 100℃ 视为有效
+     * 超出范围视为传感器开路或短路
+     */
+    return (tc >= -50.0f && tc <= 100.0f);
 }
 
 
@@ -448,6 +480,235 @@ void TempCtrl_AlarmProcess(void)
 
 
 /* ===================================================================
+ *  子逻辑5: 温度逻辑（主逻辑）
+ *
+ *  流程图 (1.温度控制流程.pdf 最左边):
+ *
+ *    开始
+ *    → 系统初始化 (由FreeRTOS启动时完成)
+ *
+ *    → 开机状态?
+ *        N → 关压缩机, 关冷凝风扇, 关蒸发风扇 → 结束
+ *        Y → 继续
+ *
+ *    → 读取设置: Ts(设定温度), C1(温度回差), C2/C3(停机保护),
+ *                C7(待机保护), C8(最短运行时间), A1-A3(报警阈值)
+ *       (均为 sys_config.h 编译期常量)
+ *
+ *    → 首次运行?
+ *        Y → 通电延迟时间C3到时?
+ *              N → 结束 (等待通电延迟)
+ *              Y → 继续
+ *        N → 继续
+ *
+ *    → 柜温传感器正常?
+ *        故障 → 故障安全, 显示故障码E1 → 结束
+ *        正常 → 继续
+ *
+ *    → 采样值: 柜温Tc
+ *
+ *    → 压缩机工作?
+ *
+ *        否(停机中):
+ *          → 停机时长 ≥ C2?
+ *              否 → 结束 (停机保护时间未到)
+ *              是 → 柜温 Tc ≥ Ts+C1?
+ *                    N → 结束 (温度够低, 无需开机)
+ *                    Y → 开启压缩机 → 结束
+ *
+ *        是(运行中):
+ *          → 低速运行时长 > C8?
+ *              否 → 结束 (最短运行时间未到, 继续运行)
+ *              是 → 柜温 Tc ≥ Ts+C1?
+ *                    Y → PID计算 → PID幅度限制及输出 → 结束
+ *                    N → 停止运行 → 结束
+ *
+ *  调用时机: 每1秒由主循环调用一次
+ * =================================================================== */
+void TempCtrl_MainLogic(void)
+{
+    EventBits_t sys_bits = xEventGroupGetBits(SysEventGroup);
+    EventBits_t tmr_bits = xEventGroupGetBits(SysTimerEventGroup);
+
+    /* ================================================================
+     * 第1步: 开机状态?
+     *   流程图顶部: 系统初始化之后的第一个判断
+     *   N → 关压缩机, 关冷凝风扇, 关蒸发风扇
+     * ================================================================ */
+    if (!(sys_bits & ST_SYSTEM_ON)) {
+        Compressor_Stop();
+        CondFan_AllOff();
+        EvapFan_AllOff();
+        return;
+    }
+
+    /* ================================================================
+     * 第2步: 读取设置
+     *   Ts  = SET_TEMP_TS         (-20℃, 设定温度)
+     *   C1  = SET_TEMP_HYST_C1    (2℃, 温度回差)
+     *   C2  = SET_STOP_TIME_C2    (180s, 停机保护时间)
+     *   C3  = SET_POWERON_DLY_C3  (180s, 通电延迟)
+     *   C7  = SET_STBY_TIME_C7    (300s, 待机保护)
+     *   C8  = SET_RUN_MIN_C8      (300s, 最短运行时间)
+     *   A1-A3 = 报警阈值
+     *
+     *   均为编译期常量 (#define), 无需运行时读取
+     * ================================================================ */
+
+    /* ================================================================
+     * 第3步: 首次运行?
+     *   Y → 通电延迟时间C3到时?
+     *         N → 结束 (等待上电稳定)
+     *         Y → 清除首次运行标志, 继续
+     *   N → 直接继续
+     *
+     *   说明: 系统首次上电时 ST_FIRST_RUN 被置位,
+     *         通电延迟C3保护压缩机不被立即启动,
+     *         防止频繁断电重启损坏压缩机
+     * ================================================================ */
+    if (sys_bits & ST_FIRST_RUN) {
+        if (!(tmr_bits & ST_TMR_C3_DONE)) {
+            /* 通电延迟未到 → 结束, 等待下次循环 */
+            return;
+        }
+        /* C3到时 → 清除首次运行标志, 后续循环不再进入此分支 */
+        xEventGroupClearBits(SysEventGroup, ST_FIRST_RUN);
+    }
+
+    /* ================================================================
+     * 第4步: 柜温传感器正常?
+     *   故障 → 置位 E1 (ERR_SENSOR_CABINET)
+     *          启动"故障安全"模式: 停机, 显示故障码
+     *   正常 → 继续
+     *
+     *   故障安全: 传感器坏了无法知道真实温度,
+     *            必须停机防止温度失控
+     * ================================================================ */
+    SysVarData_t sensor;
+    SysState_GetSensor(&sensor);
+    float tc = sensor.VAR_CABINET_TEMP;
+
+    if (!CabinetSensor_IsValid(tc)) {
+        /* 传感器故障 → E1, 故障安全 */
+        g_AlarmFlags |= ERR_SENSOR_CABINET;
+        Compressor_Stop();
+        NotifyUser(ERR_SENSOR_CABINET);
+        return;
+    }
+    /* 传感器正常 → 清除E1 */
+    g_AlarmFlags &= ~ERR_SENSOR_CABINET;
+
+    /* ================================================================
+     * 第5步: 采样值: 柜温Tc (已在上面通过 SysState_GetSensor 获取)
+     *        读设置: 停机时长C2, 运行时长 (由定时器计数)
+     * ================================================================ */
+
+    /* ================================================================
+     * 第6步: 压缩机工作?
+     *   核心温控决策 — 基于回差(C1)的启停判断:
+     *
+     *   ┌──────────────────────────────────────────────┐
+     *   │  停机中:  Tc ≥ Ts+C1  → 开机 (温度偏高)     │
+     *   │  运行中:  Tc < Ts+C1  → 停机 (温度已降到位)  │
+     *   │          Tc ≥ Ts+C1  → PID继续调节           │
+     *   └──────────────────────────────────────────────┘
+     *
+     *   回差C1的作用: 防止压缩机在设定温度附近频繁启停
+     *   例: Ts=-20℃, C1=2℃ → 升到-18℃开机, 降到<-18℃停机
+     * ================================================================ */
+
+    if (!(sys_bits & ST_COMP_RUNNING)) {
+        /* ============================================================
+         * 压缩机当前: 否(停机中)
+         *
+         * → 停机时长 ≥ C2?
+         *   C2 = 停机保护时间(180s), 防止压缩机频繁启停
+         *   TMR_C2_CNT 由定时中断服务每秒递增,
+         *   到达C2时置位 ST_TMR_C2_DONE
+         * ============================================================ */
+        if (!(tmr_bits & ST_TMR_C2_DONE)) {
+            /* 否 → 结束: 停机保护时间未到, 不允许启动 */
+            return;
+        }
+
+        /* 是: 停机保护已过 → 柜温 Tc ≥ Ts+C1? */
+        if (tc >= SET_TEMP_TS + SET_TEMP_HYST_C1) {
+            /* Y → 开启压缩机
+             *   调用子逻辑2(压缩机开机逻辑):
+             *   设置F=125Hz, 启动热车计时C20
+             */
+            TempCtrl_CompressorStart();
+
+            /* 复位最短运行时间计时器C8 (从0开始计时) */
+            g_TimerData.TMR_C8_CNT = 0;
+            xEventGroupClearBits(SysTimerEventGroup, ST_TMR_C8_DONE);
+
+            /* 复位长时间运行计时器 (从0开始计时) */
+            g_TimerData.TMR_LONGRUN_CNT = 0;
+        }
+        /* N → 结束: 温度够低(Tc < Ts+C1), 无需开机 */
+
+    } else {
+        /* ============================================================
+         * 压缩机当前: 是(运行中)
+         *
+         * → 低速运行时长 > C8?
+         *   C8 = 最短运行时间(300s), 防止压缩机启动后很快停止
+         *   TMR_C8_CNT 由定时中断服务每秒递增,
+         *   到达C8时置位 ST_TMR_C8_DONE
+         * ============================================================ */
+        if (!(tmr_bits & ST_TMR_C8_DONE)) {
+            /* 否 → 结束: 最短运行时间未到, 必须继续运行
+             * (即使温度已达标也不能停, 保护压缩机)
+             */
+            return;
+        }
+
+        /* 是: 最短运行时间已过 → 柜温 Tc ≥ Ts+C1? */
+        if (tc >= SET_TEMP_TS + SET_TEMP_HYST_C1) {
+            /* Y → 温度还高, 继续运行, PID调整频率
+             *
+             *   PID调整需要满足两个前置条件:
+             *   a) 热车时长C20已完成 (CompressorWarmup_IsDone)
+             *   b) PID周期30s到时 (ST_TMR_PID_DONE)
+             *
+             *   热车期间保持F=125Hz, 不做PID调整
+             */
+            if (CompressorWarmup_IsDone()) {
+                /* 热车完成 → 检查PID周期 */
+                if (tmr_bits & ST_TMR_PID_DONE) {
+                    TempCtrl_PID_Adjust();
+                    /* 复位PID周期计时器, 等待下一个30s */
+                    g_TimerData.TMR_PID_CNT = 0;
+                    xEventGroupClearBits(SysTimerEventGroup, ST_TMR_PID_DONE);
+                }
+            }
+            /* else: 热车中, 保持F=125Hz继续运转 */
+
+        } else {
+            /* N → 温度已降到位(Tc < Ts+C1), 停止运行
+             *
+             *   停机后需要:
+             *   1. 发送停机指令
+             *   2. 复位停机保护计时器C2 (从0开始, 保护期内不允许再启动)
+             *   3. 清除热车完成标志 (下次启动需重新热车)
+             */
+            Compressor_Stop();
+
+            /* 复位停机保护计时器C2 */
+            g_TimerData.TMR_C2_CNT = 0;
+            xEventGroupClearBits(SysTimerEventGroup, ST_TMR_C2_DONE);
+
+            /* 清除热车状态, 下次启动需重新热车 */
+            xEventGroupClearBits(SysEventGroup, ST_WARMUP_DONE);
+            xEventGroupClearBits(SysTimerEventGroup, ST_TMR_WARMUP_DONE);
+            g_TimerData.TMR_WARMUP_CNT = 0;
+        }
+    }
+}
+
+
+/* ===================================================================
  *  子逻辑3: 油壳加热逻辑
  *
  *  流程图 (1.1):
@@ -488,73 +749,96 @@ void TempCtrl_OilHeatControl(void)
 /* ===================================================================
  *  温度控制任务主循环
  *
- *  作为FreeRTOS任务运行, 周期性执行子逻辑:
- *    1. 停机异常检测 (每次循环, 最高优先级)
- *    2. 告警(温度压力)处理 (每次循环)
- *    3. 压缩机开机/运行管理
- *    4. 油壳加热管理
+ *  作为FreeRTOS任务运行, 每1秒执行一轮 (对应流程图"1s到时?"):
  *
- *  循环周期: 1秒 (与逻辑图中1s采集周期对应)
+ *    ┌─ 第1步: 停机异常逻辑告警  (ERR级别, 最高优先级)
+ *    │  第2步: 告警(温度压力)处理 (WARN级别, 通知用户)
+ *    │  第3步: 传感器故障恢复检查 (ERR_SENSOR_CABINET自恢复)
+ *    │    ↓ 有ERR → 跳过主逻辑, 仅管理油壳加热
+ *    │  第4步: 温度逻辑(主逻辑)   (启停决策 + PID)
+ *    │  第5步: 油壳加热逻辑       (任何状态都执行)
+ *    └─ 延时1秒, 回到第1步
+ *
+ *  5个子逻辑在同一个FreeRTOS任务中按序执行,
+ *  后续6大逻辑块完成后, 每块将独立为一个FreeRTOS任务
  * =================================================================== */
 void Task_TempCtrl_Process(void const *argument)
 {
     (void)argument;
 
-    /* 等待系统初始化完成, 传感器数据稳定 */
+    /* 系统初始化: 置位首次运行标志, 启动通电延迟C3计时
+     * (对应流程图"系统初始化"步骤)
+     */
+    xEventGroupSetBits(SysEventGroup, ST_FIRST_RUN);
+    g_TimerData.TMR_C3_CNT = 0;
+    xEventGroupClearBits(SysTimerEventGroup, ST_TMR_C3_DONE);
+
+    /* 初始状态: 停机保护计时器C2直接置为到时
+     * (首次上电时不需要等待停机保护, C3延迟已经提供了保护)
+     */
+    xEventGroupSetBits(SysTimerEventGroup, ST_TMR_C2_DONE);
+
+    /* 等待传感器数据稳定 */
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     for (;;) {
         /* ============================================
-         * 第1步: 停机异常逻辑告警 (最高优先级, 每次必检)
+         * 第1步: 停机异常逻辑告警
+         *   最高优先级, 每次必检
+         *   检查: VDC电压 / VAC相序 / 变频器过流 / 变频器过热
+         *   有异常 → ERR级别, 直接停机
          * ============================================ */
         TempCtrl_ShutdownAlarm();
 
         /* ============================================
-         * 第2步: 告警(温度压力)处理逻辑 (每次循环)
-         *   WARN级别: 不直接停机, 但通知用户
+         * 第2步: 告警(温度压力)处理逻辑
+         *   WARN级别: 不直接停机, 通知用户
+         *   检查: 排温/连续运行/吸温/排压/吸压
          * ============================================ */
         TempCtrl_AlarmProcess();
 
-        /* 如果有严重故障(ERR级别), 跳过压缩机管理 */
+        /* ============================================
+         * 第3步: 传感器故障恢复检查
+         *   传感器故障(E1)是由主逻辑设置的ERR,
+         *   在ERR状态下主逻辑被跳过, 无法自行清除,
+         *   所以在此独立检查传感器是否恢复正常
+         * ============================================ */
+        if (g_AlarmFlags & ERR_SENSOR_CABINET) {
+            SysVarData_t s;
+            SysState_GetSensor(&s);
+            if (CabinetSensor_IsValid(s.VAR_CABINET_TEMP)) {
+                g_AlarmFlags &= ~ERR_SENSOR_CABINET;
+            }
+        }
+
+        /* ============================================
+         * ERR安全门: 有严重故障时跳过主逻辑
+         *   ERR级别(VDC/VAC/变频器/传感器)存在时,
+         *   禁止运行温度逻辑(防止错误启动压缩机),
+         *   但油壳加热仍需正常管理
+         * ============================================ */
         if (g_AlarmFlags & ERR_MASK_ALL) {
-            /* 确保油壳加热也被正确管理 (即使故障状态) */
             TempCtrl_OilHeatControl();
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
         /* ============================================
-         * 第3步: 压缩机开机/运行逻辑
+         * 第4步: 温度逻辑(主逻辑)
+         *   核心温控决策:
+         *   开机/关机判断 → 传感器检查 → 回差启停 → PID调节
          * ============================================ */
-        EventBits_t sys_bits = xEventGroupGetBits(SysEventGroup);
-
-        if (sys_bits & ST_SYSTEM_ON) {
-            if (!(sys_bits & ST_COMP_RUNNING)) {
-                /* 系统开启但压缩机未运行 → 启动压缩机 */
-                TempCtrl_CompressorStart();
-            } else {
-                /* 压缩机运行中 → 检查热车/PID */
-                if (CompressorWarmup_IsDone()) {
-                    /* 热车完成 → PID调整 */
-                    EventBits_t tmr_bits = xEventGroupGetBits(SysTimerEventGroup);
-                    if (tmr_bits & ST_TMR_PID_DONE) {
-                        TempCtrl_PID_Adjust();
-                        /* 复位PID周期计时器 */
-                        g_TimerData.TMR_PID_CNT = 0;
-                        xEventGroupClearBits(SysTimerEventGroup, ST_TMR_PID_DONE);
-                    }
-                }
-                /* else: 热车中, 保持 F=125Hz */
-            }
-        }
+        TempCtrl_MainLogic();
 
         /* ============================================
-         * 第4步: 油壳加热逻辑
+         * 第5步: 油壳加热逻辑
+         *   无论系统处于何种状态都执行
          * ============================================ */
         TempCtrl_OilHeatControl();
 
         /* ============================================
          * 循环延时: 1秒
+         *   对应流程图中"1s到时?"的周期
          * ============================================ */
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
