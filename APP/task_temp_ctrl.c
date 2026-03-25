@@ -10,10 +10,11 @@
 /* ===========================================================================
  * 温度控制流程 (逻辑图1) — 实现文件
  *
- * 三个子逻辑:
+ * 子逻辑:
  *   1. TempCtrl_ShutdownAlarm()    停机异常逻辑告警
  *   2. TempCtrl_CompressorStart()  压缩机开机逻辑
  *   3. TempCtrl_OilHeatControl()   油壳加热逻辑
+ *   4. TempCtrl_AlarmProcess()     告警(温度压力)处理逻辑
  * =========================================================================== */
 
 /* ===================================================================
@@ -274,6 +275,179 @@ static void TempCtrl_PID_Adjust(void)
 
 
 /* ===================================================================
+ *  子逻辑4: 告警（温度压力）处理逻辑
+ *
+ *  流程图 (1.温度控制流程.pdf 从左数第二个):
+ *
+ *    开始
+ *    → 1s到时?  N→等待  Y→继续
+ *    → 采集: T1(冷箱内温度), TH(排气温度), TL(吸气温度),
+ *            F(压缩机频率), PL(吸气压力), PH(排气压力), Kp(膨胀阀开度)
+ *    → 读取: TS(设定温度), Tmax(排温上限), Tmin(吸温下限), VDCmin
+ *
+ *    ① 排温 TH ≥ Tmax [110℃]?
+ *        Y → WTM (排温过高告警)
+ *        N → -(WTM)
+ *
+ *    ② 连续开机时长 ≥ 1-2小时?
+ *        Y → WLC (长时间运行告警)
+ *        N → -(WLC)
+ *
+ *    ③ 设定值TLS - 吸温TL ≤ Tmin [5-10℃, 温差15]?
+ *        Y → WTL (吸温过低告警)
+ *        N → -(WTL)
+ *
+ *    ④ 排压 PH ≥ Pmax [110/70]?
+ *        Y → WPH1 → 高压超时? → Y:WPH2  N:-(WPH2)
+ *        N → -(WPH1), -(WPH2), 复位高压计时
+ *
+ *    ⑤ 吸压 PL ≤ Pmin [20]?
+ *        Y → WPL1 → 低压超时? → Y:WPL2  N:-(WPL2)
+ *        N → -(WPL1), -(WPL2), 复位低压计时
+ *
+ *    ⑥ 汇总: WPL|WPH|WTM|WTL|WLC 任一存在?
+ *        Y → WEN (综合告警, 通知用户)
+ *        N → -(WEN)
+ *    → 结束
+ *
+ *  调用时机: 每1秒由主循环调用一次 (与流程图"1s到时?"对应)
+ *  注意: 本逻辑只产生WARN级别告警, 不直接停机;
+ *        停机由子逻辑1(停机异常逻辑告警)的ERR级别负责
+ * =================================================================== */
+void TempCtrl_AlarmProcess(void)
+{
+    SysVarData_t sensor;
+    SysState_GetSensor(&sensor);
+
+    /* ================================================================
+     * ① 排温 TH ≥ Tmax [110℃]?
+     *    排气温度过高说明压缩比过大或制冷剂不足
+     * ================================================================ */
+    if (sensor.VAR_EXHAUST_TEMP >= SET_EXHAUST_TMAX) {
+        /* Y → WTM 置位 */
+        g_AlarmFlags |= WARN_EXHAUST_HIGH;
+    } else {
+        /* N → -(WTM) 清除 */
+        g_AlarmFlags &= ~WARN_EXHAUST_HIGH;
+    }
+
+    /* ================================================================
+     * ② 连续开机时长 ≥ 1-2小时?
+     *    TMR_LONGRUN_CNT 由定时中断服务(逻辑图5)在压缩机运行期间每秒递增
+     *    压缩机停止时由其他逻辑复位
+     *
+     *    流程图标注"1-2小时":
+     *      SET_WARN_LONGRUN_L = 3600s (1小时, 初级告警)
+     *      SET_WARN_LONGRUN_H = 7200s (2小时, 严重告警)
+     *    此处用低阈值(1小时)触发告警, 符合流程图"≥1-2小时"
+     * ================================================================ */
+    EventBits_t sys_bits = xEventGroupGetBits(SysEventGroup);
+
+    if (sys_bits & ST_COMP_RUNNING) {
+        /* 压缩机运行中, 检查累计运行时长 */
+        if (g_TimerData.TMR_LONGRUN_CNT >= SET_WARN_LONGRUN_L) {
+            /* Y → WLC 置位 */
+            g_AlarmFlags |= WARN_LONGRUN;
+        } else {
+            /* N → -(WLC) 清除 */
+            g_AlarmFlags &= ~WARN_LONGRUN;
+        }
+    } else {
+        /* 压缩机未运行, 清除长运行告警并复位计时 */
+        g_AlarmFlags &= ~WARN_LONGRUN;
+        g_TimerData.TMR_LONGRUN_CNT = 0;
+    }
+
+    /* ================================================================
+     * ③ 设定值TLS - 吸温TL ≤ Tmin [5-10℃, 温差15]?
+     *    含义: 吸气温度过低 → 吸气过热度不足, 有液击风险
+     *    计算: (设定蒸发温度TLS) - (实际吸气温度TL)
+     *    如果差值 ≤ Tmin(15℃), 说明吸温偏低
+     *
+     *    SET_SUCTION_TMIN = 15.0f (温差阈值)
+     *    TLS 近似取 SET_TEMP_TS (设定温度)
+     * ================================================================ */
+    float suction_diff = SET_TEMP_TS - sensor.VAR_SUCTION_TEMP;
+
+    if (suction_diff <= SET_SUCTION_TMIN) {
+        /* Y → WTL 置位: 吸温与设定值差距过小, 吸气过热度不足 */
+        g_AlarmFlags |= WARN_SUCTION_LOW;
+    } else {
+        /* N → -(WTL) 清除 */
+        g_AlarmFlags &= ~WARN_SUCTION_LOW;
+    }
+
+    /* ================================================================
+     * ④ 排压 PH ≥ Pmax [110/70]?
+     *    流程图标注两个值: 高档110bar, 低档70bar
+     *    此处用 SET_DISCHARGE_PMAX_L (70bar) 作为告警触发阈值
+     *
+     *    分两级:
+     *      WPH1 = 排压超限 (即时告警)
+     *      WPH2 = 排压超限且持续超时 (严重告警)
+     * ================================================================ */
+    if (sensor.VAR_DISCHARGE_PRES >= SET_DISCHARGE_PMAX_L) {
+        /* Y → WPH1 置位: 排压超限 */
+        g_AlarmFlags |= WARN_PRES_HIGH;
+
+        /* 高压超时? — TMR_PRES_HIGH_CNT 由定时中断每秒递增 */
+        if (g_TimerData.TMR_PRES_HIGH_CNT >= SET_WARN_PRES_TMO) {
+            /* Y → WPH2 置位: 高压持续超时 */
+            g_AlarmFlags |= WARN_PRES_HIGH_TMO;
+        } else {
+            /* N → -(WPH2) */
+            g_AlarmFlags &= ~WARN_PRES_HIGH_TMO;
+        }
+    } else {
+        /* N → -(WPH1), -(WPH2), 复位高压计时 */
+        g_AlarmFlags &= ~WARN_PRES_HIGH;
+        g_AlarmFlags &= ~WARN_PRES_HIGH_TMO;
+        g_TimerData.TMR_PRES_HIGH_CNT = 0;
+    }
+
+    /* ================================================================
+     * ⑤ 吸压 PL ≤ Pmin [20]?
+     *    吸气压力过低说明制冷剂不足或膨胀阀开度不够
+     *
+     *    分两级:
+     *      WPL1 = 吸压过低 (即时告警)
+     *      WPL2 = 吸压过低且持续超时 (严重告警)
+     * ================================================================ */
+    if (sensor.VAR_SUCTION_PRES <= SET_SUCTION_PMIN) {
+        /* Y → WPL1 置位: 吸压过低 */
+        g_AlarmFlags |= WARN_PRES_LOW;
+
+        /* 低压超时? — TMR_PRES_LOW_CNT 由定时中断每秒递增 */
+        if (g_TimerData.TMR_PRES_LOW_CNT >= SET_WARN_PRES_TMO) {
+            /* Y → WPL2 置位: 低压持续超时 */
+            g_AlarmFlags |= WARN_PRES_LOW_TMO;
+        } else {
+            /* N → -(WPL2) */
+            g_AlarmFlags &= ~WARN_PRES_LOW_TMO;
+        }
+    } else {
+        /* N → -(WPL1), -(WPL2), 复位低压计时 */
+        g_AlarmFlags &= ~WARN_PRES_LOW;
+        g_AlarmFlags &= ~WARN_PRES_LOW_TMO;
+        g_TimerData.TMR_PRES_LOW_CNT = 0;
+    }
+
+    /* ================================================================
+     * ⑥ 汇总: WPL|WPH|WTM|WTL|WLC 任一存在 → WEN通知用户
+     *    流程图最底部: 所有告警汇聚到一个判断
+     * ================================================================ */
+    if (g_AlarmFlags & WARN_MASK_ALL) {
+        /* 存在任意WARN → WEN 置位, 通知用户 */
+        g_AlarmFlags |= WARN_NOTIFY_USER;
+        NotifyUser(g_AlarmFlags & WARN_MASK_ALL);
+    } else {
+        /* 全部正常 → -(WEN) 清除 */
+        g_AlarmFlags &= ~WARN_NOTIFY_USER;
+    }
+}
+
+
+/* ===================================================================
  *  子逻辑3: 油壳加热逻辑
  *
  *  流程图 (1.1):
@@ -314,10 +488,11 @@ void TempCtrl_OilHeatControl(void)
 /* ===================================================================
  *  温度控制任务主循环
  *
- *  作为FreeRTOS任务运行, 周期性执行三个子逻辑:
- *    1. 停机异常检测 (每次循环)
- *    2. 压缩机开机/运行管理
- *    3. 油壳加热管理
+ *  作为FreeRTOS任务运行, 周期性执行子逻辑:
+ *    1. 停机异常检测 (每次循环, 最高优先级)
+ *    2. 告警(温度压力)处理 (每次循环)
+ *    3. 压缩机开机/运行管理
+ *    4. 油壳加热管理
  *
  *  循环周期: 1秒 (与逻辑图中1s采集周期对应)
  * =================================================================== */
@@ -334,7 +509,13 @@ void Task_TempCtrl_Process(void const *argument)
          * ============================================ */
         TempCtrl_ShutdownAlarm();
 
-        /* 如果有严重故障, 跳过后续逻辑 */
+        /* ============================================
+         * 第2步: 告警(温度压力)处理逻辑 (每次循环)
+         *   WARN级别: 不直接停机, 但通知用户
+         * ============================================ */
+        TempCtrl_AlarmProcess();
+
+        /* 如果有严重故障(ERR级别), 跳过压缩机管理 */
         if (g_AlarmFlags & ERR_MASK_ALL) {
             /* 确保油壳加热也被正确管理 (即使故障状态) */
             TempCtrl_OilHeatControl();
@@ -343,7 +524,7 @@ void Task_TempCtrl_Process(void const *argument)
         }
 
         /* ============================================
-         * 第2步: 压缩机开机/运行逻辑
+         * 第3步: 压缩机开机/运行逻辑
          * ============================================ */
         EventBits_t sys_bits = xEventGroupGetBits(SysEventGroup);
 
@@ -368,7 +549,7 @@ void Task_TempCtrl_Process(void const *argument)
         }
 
         /* ============================================
-         * 第3步: 油壳加热逻辑
+         * 第4步: 油壳加热逻辑
          * ============================================ */
         TempCtrl_OilHeatControl();
 

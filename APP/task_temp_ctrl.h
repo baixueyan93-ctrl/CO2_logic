@@ -8,10 +8,11 @@
 /* ===========================================================================
  * 温度控制流程 (逻辑图1) — FreeRTOS 任务
  *
- * 包含三个子逻辑:
- *   1. 停机异常逻辑告警  TempCtrl_ShutdownAlarm()
- *   2. 压缩机开机逻辑    TempCtrl_CompressorStart()
- *   3. 油壳加热逻辑      TempCtrl_OilHeatControl()
+ * 包含子逻辑 (来自逻辑图1的5个子流程图):
+ *   1. 停机异常逻辑告警        TempCtrl_ShutdownAlarm()
+ *   2. 压缩机开机逻辑          TempCtrl_CompressorStart()
+ *   3. 油壳加热逻辑            TempCtrl_OilHeatControl()
+ *   4. 告警(温度压力)处理逻辑  TempCtrl_AlarmProcess()
  *
  * 后续扩展: 6大逻辑块各为一个FreeRTOS任务
  *   任务1: 温度控制流程  (本文件)
@@ -25,10 +26,11 @@
 /* --- 任务入口 --- */
 void Task_TempCtrl_Process(void const *argument);
 
-/* --- 三个子逻辑 (内部调用, 也可单独测试) --- */
-void TempCtrl_ShutdownAlarm(void);     /* 停机异常逻辑告警 */
-void TempCtrl_CompressorStart(void);   /* 压缩机开机逻辑   */
-void TempCtrl_OilHeatControl(void);    /* 油壳加热逻辑     */
+/* --- 子逻辑 (内部调用, 也可单独测试) --- */
+void TempCtrl_ShutdownAlarm(void);     /* 停机异常逻辑告警           */
+void TempCtrl_CompressorStart(void);   /* 压缩机开机逻辑             */
+void TempCtrl_OilHeatControl(void);    /* 油壳加热逻辑               */
+void TempCtrl_AlarmProcess(void);      /* 告警(温度压力)处理逻辑     */
 
 /* ===========================================================================
  * 硬件接口定义 (待确认后填入实际引脚)
