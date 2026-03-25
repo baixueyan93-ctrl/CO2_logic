@@ -56,6 +56,57 @@ static void Defrost_StopCompressor(void)
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
 }
 
+/* --- 除霜时启动压缩机 (热气除霜) ---
+ * 与正常制冷不同: 热气除霜用压缩机排出的高温气体加热蒸发器
+ */
+static void Defrost_StartCompressor(float freq_hz)
+{
+    /* TODO: 通过变频器通信启动压缩机并设置频率
+     * 除霜模式下的压缩机运行方式可能与制冷模式不同
+     */
+    xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
+    SysState_Lock();
+    SysState_GetRawPtr()->VAR_COMP_FREQ = freq_hz;
+    SysState_Unlock();
+}
+
+/* --- 膨胀阀步进到除霜位置 --- */
+static void Defrost_ValveStep(void)
+{
+    /* TODO: 调用 bsp_exv 接口, 将膨胀阀步进到除霜位置
+     * 除霜时膨胀阀需要开到特定开度, 让高温制冷剂通过蒸发器
+     */
+}
+
+/* ===================================================================
+ *  加热子程序状态机定义
+ *
+ *  流程图中加热子程序包含延时和多步操作,
+ *  不能阻塞FreeRTOS任务, 所以用状态机实现,
+ *  每秒被主循环调用一次, 逐步推进
+ * =================================================================== */
+typedef enum {
+    HEAT_IDLE,           /* 空闲, 等待启动                           */
+    HEAT_WAIT_DELAY1,    /* 等待第一个延时X (SET_DEF_STEP_DLY = 30s) */
+    HEAT_VALVE_STEP,     /* 执行膨胀阀步进动作                       */
+    HEAT_WAIT_DELAY2,    /* 等待第二个延时X (30s)                    */
+    HEAT_COMP_DELAY,     /* 等待15s后开压缩机 (SET_DEF_COMP_DLY)    */
+    HEAT_COMP_RAMP,      /* 压缩机由慢到快步进升频                   */
+    HEAT_RUNNING         /* 加热运行中, 测温度                       */
+} DefrostHeatState_t;
+
+static DefrostHeatState_t s_heat_state = HEAT_IDLE;
+static uint32_t s_heat_delay_cnt = 0;     /* 加热子程序内部延时计数器 */
+static float    s_comp_ramp_freq = 0.0f;  /* 压缩机升频当前值       */
+
+/* --- 加热子程序状态机复位 --- */
+static void Defrost_HeatReset(void)
+{
+    s_heat_state = HEAT_IDLE;
+    s_heat_delay_cnt = 0;
+    s_comp_ramp_freq = 0.0f;
+}
+
 /* --- 加热→滴水 阶段转换 ---
  *
  *  流程图中加热结束后的公共路径:
@@ -73,6 +124,12 @@ static void Defrost_TransitionToDrip(void)
     /* 反标记正在加热(仅做反标记) — 关加热器, 清加热标志 */
     DefrostHeater_Off();
     xEventGroupClearBits(SysEventGroup, ST_DEF_HEATING);
+
+    /* 停止除霜用的压缩机 (滴水阶段不需要压缩机运行) */
+    Defrost_StopCompressor();
+
+    /* 复位加热子程序状态机 */
+    Defrost_HeatReset();
 
     /* 标记正在滴水 */
     xEventGroupSetBits(SysEventGroup, ST_DEF_DRIPPING);
@@ -199,6 +256,9 @@ void Defrost_MainProcess(void)
                 g_TimerData.TMR_DEF_INTV_CNT = 0;
                 xEventGroupClearBits(SysTimerEventGroup, ST_TMR_DEF_INTV_DONE);
 
+                /* 复位加热子程序状态机 (安全保障) */
+                Defrost_HeatReset();
+
                 /* 除霜完成后: 延迟15秒后恢复压缩机
                  * SET_DEF_COMP_DLY = 15秒
                  * TODO: 通知温度控制任务可以恢复压缩机
@@ -215,6 +275,9 @@ void Defrost_MainProcess(void)
              *    1. 加热时间超时 (SET_DEF_HEAT_MAX = 45分钟)
              *    2. 加热温度超值 (蒸发器温度 ≥ SET_DEF_HEAT_TLIMIT = 10℃)
              * ======================================================== */
+
+            /* 每周期驱动加热子程序状态机 (膨胀阀步进 + 压缩机启动) */
+            Defrost_HeatSubroutine();
 
             /* ---- 加热时间超时? ---- */
             if (tmr_bits & ST_TMR_DEF_DUR_DONE) {
@@ -299,42 +362,154 @@ void Defrost_MainProcess(void)
 
 
 /* ===================================================================
- *  子逻辑2: 加热子程序 (框架桩)
+ *  子逻辑2: 加热子程序
  *
  *  流程图 (2.除霜流程.pdf 右侧):
  *
  *    加热子程序
- *    → 延时X时间够?
+ *    → 延时X时间够?             ← 第一个延时(30s): 等待系统稳定
  *        N → 结束 (等待下次调用)
- *        Y → 延时步进 (膨胀阀动作)
- *    → 延时X时间够?
+ *        Y → 延时步进             ← 膨胀阀步进到除霜位置
+ *    → 延时X时间够?             ← 第二个延时(30s): 等待阀门到位
  *        N → 结束
- *        Y → 15s后开压缩机, 由慢到快步进
- *    → 测温度
+ *        Y → 15s后开压缩机       ← 等15s后启动压缩机
+ *            由慢到快步进         ← 压缩机频率逐步升高
+ *    → 测温度                    ← 确认加热已开始工作
  *    → 结束
  *
- *  说明: 除霜启动时的硬件初始化序列
- *        控制膨胀阀步进到位, 延时后启动压缩机热气除霜
- *        SET_DEF_STEP_DLY = 30秒 (延时X)
- *        SET_DEF_COMP_DLY = 15秒 (压缩机延迟)
+ *  实现方式: 状态机 (不阻塞, 每秒被主循环调用一次)
  *
- *  TODO: 第二步实现此子程序
+ *  状态转换:
+ *    IDLE → WAIT_DELAY1(30s) → VALVE_STEP → WAIT_DELAY2(30s)
+ *         → COMP_DELAY(15s) → COMP_RAMP(升频) → RUNNING(测温)
+ *
+ *  延时X = SET_DEF_STEP_DLY (30秒)
+ *  压缩机延迟 = SET_DEF_COMP_DLY (15秒)
  * =================================================================== */
 void Defrost_HeatSubroutine(void)
 {
-    /* TODO: 实现加热子程序
+    switch (s_heat_state) {
+
+    /* ================================================================
+     *  HEAT_IDLE: 空闲 → 启动第一个延时X
      *
-     * 基本框架:
-     *   1. 控制膨胀阀步进到除霜位置 (通过 task_exv 接口)
-     *   2. 等待延时X (SET_DEF_STEP_DLY = 30秒)
-     *   3. 延时后开压缩机, 由慢到快步进频率
-     *   4. 等待15秒 (SET_DEF_COMP_DLY)
-     *   5. 测温度确认加热开始
+     *  刚进入加热阶段, 初始化延时计数器,
+     *  进入第一个等待周期
+     * ================================================================ */
+    case HEAT_IDLE:
+        s_heat_delay_cnt = 0;
+        s_heat_state = HEAT_WAIT_DELAY1;
+        break;
+
+    /* ================================================================
+     *  HEAT_WAIT_DELAY1: 延时X时间够? (第一个30s)
      *
-     * 注意: 此函数不能阻塞 (在FreeRTOS任务中),
-     *       需要用状态机方式分步执行,
-     *       或由定时标志驱动各步骤
-     */
+     *  流程图: "延时X时间够? → N → 结束"
+     *  等待30秒让系统稳定 (停机后管路压力平衡)
+     * ================================================================ */
+    case HEAT_WAIT_DELAY1:
+        s_heat_delay_cnt++;
+        if (s_heat_delay_cnt >= SET_DEF_STEP_DLY) {
+            /* Y → 延时到, 进入膨胀阀步进 */
+            s_heat_state = HEAT_VALVE_STEP;
+        }
+        /* N → 结束(等待下次调用) */
+        break;
+
+    /* ================================================================
+     *  HEAT_VALVE_STEP: 延时步进 (膨胀阀动作)
+     *
+     *  流程图: "延时步进"
+     *  将膨胀阀步进到除霜位置, 让高温制冷剂能通过蒸发器
+     *  动作完成后立即进入第二个延时等待
+     * ================================================================ */
+    case HEAT_VALVE_STEP:
+        Defrost_ValveStep();           /* 膨胀阀步进到除霜位置 */
+        s_heat_delay_cnt = 0;          /* 复位计数, 准备第二个延时 */
+        s_heat_state = HEAT_WAIT_DELAY2;
+        break;
+
+    /* ================================================================
+     *  HEAT_WAIT_DELAY2: 延时X时间够? (第二个30s)
+     *
+     *  流程图: 第二个"延时X时间够? → N → 结束"
+     *  等待30秒让膨胀阀完全到位
+     * ================================================================ */
+    case HEAT_WAIT_DELAY2:
+        s_heat_delay_cnt++;
+        if (s_heat_delay_cnt >= SET_DEF_STEP_DLY) {
+            /* Y → 延时到, 准备开压缩机 */
+            s_heat_delay_cnt = 0;
+            s_heat_state = HEAT_COMP_DELAY;
+        }
+        /* N → 结束(等待下次调用) */
+        break;
+
+    /* ================================================================
+     *  HEAT_COMP_DELAY: 15s后开压缩机
+     *
+     *  流程图: "15s后开压缩机"
+     *  再等15秒 (SET_DEF_COMP_DLY), 然后启动压缩机
+     * ================================================================ */
+    case HEAT_COMP_DELAY:
+        s_heat_delay_cnt++;
+        if (s_heat_delay_cnt >= SET_DEF_COMP_DLY) {
+            /* 15s到 → 启动压缩机, 初始低频 */
+            s_comp_ramp_freq = SET_FREQ_MIN;   /* 从最低频率开始 (20Hz) */
+            Defrost_StartCompressor(s_comp_ramp_freq);
+            s_heat_delay_cnt = 0;
+            s_heat_state = HEAT_COMP_RAMP;
+        }
+        /* N → 结束(等待15s) */
+        break;
+
+    /* ================================================================
+     *  HEAT_COMP_RAMP: 由慢到快步进
+     *
+     *  流程图: "由慢到快步进"
+     *  压缩机频率从最低(20Hz)逐步升到目标频率(125Hz)
+     *  每秒增加一定步长, 避免瞬间高负荷
+     * ================================================================ */
+    case HEAT_COMP_RAMP: {
+        /* 每秒升频, 直到达到目标频率 */
+        const float RAMP_STEP = 10.0f;     /* 每秒升10Hz (待确认) */
+        const float RAMP_TARGET = SET_FREQ_INIT;  /* 目标: 125Hz */
+
+        s_comp_ramp_freq += RAMP_STEP;
+        if (s_comp_ramp_freq >= RAMP_TARGET) {
+            s_comp_ramp_freq = RAMP_TARGET;
+            s_heat_state = HEAT_RUNNING;   /* 升频完成, 进入运行状态 */
+        }
+
+        /* 更新压缩机频率 */
+        SysState_Lock();
+        SysState_GetRawPtr()->VAR_COMP_FREQ = s_comp_ramp_freq;
+        SysState_Unlock();
+
+        /* TODO: 通过变频器通信实际设置频率 */
+        break;
+    }
+
+    /* ================================================================
+     *  HEAT_RUNNING: 测温度 → 加热运行中
+     *
+     *  流程图: "测温度 → 结束"
+     *  压缩机已达到目标频率, 加热正常运行,
+     *  温度监控和退出判断由主程序 Defrost_MainProcess() 负责:
+     *    - 加热时间超时(45min) → 转入滴水
+     *    - 蒸发器温度≥10℃    → 转入滴水
+     *
+     *  此状态下子程序无需额外操作, 仅保持运行
+     * ================================================================ */
+    case HEAT_RUNNING:
+        /* 加热运行中, 无需操作 (主程序监控退出条件) */
+        break;
+
+    default:
+        /* 异常状态, 复位 */
+        Defrost_HeatReset();
+        break;
+    }
 }
 
 
