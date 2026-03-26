@@ -38,6 +38,7 @@
 #include "task_defrost.h"   // ��˪���� (�߼�ͼ2)
 #include "task_evap_fan.h"  // ����������(1��6)���� (�߼�ͼ3)
 #include "task_freq_exv.h"  // ��Ƶ����(PID)�����ͷ����� (�߼�ͼ4)
+#include "task_timer_svc.h" // ��ʱ�жϷ��� (�߼�ͼ5)
 #include "bsp_i2c_mutex.h" // I2C1 ���߻�����
 #include "sys_state.h"    // ����ϵͳ״̬ͷ�ļ�
 /* USER CODE END Includes */
@@ -71,6 +72,7 @@ osThreadId Task_TempCtrlHandle;
 osThreadId Task_DefrostHandle;
 osThreadId Task_EvapFanHandle;
 osThreadId Task_FreqExvHandle;
+osThreadId Task_TimerSvcHandle;
 osMutexId EEPROM_MutexHandle;
 
 /* Private function prototypes -----------------------------------------------*/
@@ -88,6 +90,7 @@ void StartTask_TempCtrl(void const * argument);
 void StartTask_Defrost(void const * argument);
 void StartTask_EvapFan(void const * argument);
 void StartTask_FreqExv(void const * argument);
+void StartTask_TimerSvc(void const * argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -179,6 +182,10 @@ void MX_FREERTOS_Init(void) {
   /* ��Ƶ����(PID)�����ͷ��������� (�߼�ͼ4, ��ͨ���ȼ�, 512ջ) */
   osThreadDef(Task_FreqExv, StartTask_FreqExv, osPriorityNormal, 0, 512);
   Task_FreqExvHandle = osThreadCreate(osThread(Task_FreqExv), NULL);
+
+  /* ��ʱ�жϷ��������(�߼�ͼ5, ����ͨ���ȼ�, 256ջ) */
+  osThreadDef(Task_TimerSvc, StartTask_TimerSvc, osPriorityAboveNormal, 0, 256);
+  Task_TimerSvcHandle = osThreadCreate(osThread(Task_TimerSvc), NULL);
   /* USER CODE END RTOS_THREADS */
 
 }
@@ -296,6 +303,11 @@ void StartTask_EvapFan(void const * argument)
 void StartTask_FreqExv(void const * argument)
 {
   Task_FreqExv_Process(argument);
+  for(;;) { osDelay(1); }
+}
+void StartTask_TimerSvc(void const * argument)
+{
+  Task_TimerSvc_Process(argument);
   for(;;) { osDelay(1); }
 }
 /* USER CODE END Application */
