@@ -275,34 +275,24 @@ static bool CompressorWarmup_IsDone(void)
     return false;
 }
 
-/* --- PID调整模块 (框架桩) ---
- * 热车完成后, 由此函数根据温度偏差计算压缩机频率
+/* --- PID调整模块 (已迁移到逻辑图4) ---
+ * 完整PID和膨胀阀调整逻辑已在 task_freq_exv.c 中实现 (逻辑图4).
+ * Task_FreqExv 任务每30秒独立执行 PID调整 + 膨胀阀调整.
+ *
+ * 本函数保留作为温控任务内的快速频率修正桩:
+ *   温控主逻辑中的PID调用点仍会触发此函数,
+ *   但实际的PID计算和频率输出已由 FreqExv_PidAdjust() 负责.
+ *   此处仅做简单的安全保护检查.
  */
 static void TempCtrl_PID_Adjust(void)
 {
-    /* TODO: 完整PID实现将在 逻辑图4(变频控制和膨胀阀流程) 中展开
+    /* PID核心逻辑已迁移到 Task_FreqExv (逻辑图4)
+     * 该任务独立以30秒为周期执行:
+     *   FreqExv_PidAdjust()  — 压缩机频率调节
+     *   FreqExv_ExvAdjust()  — 膨胀阀开度调节
      *
-     * 基本框架:
-     *   1. 计算偏差: deltaT = VAR_CABINET_TEMP - SET_TEMP_TS
-     *   2. PID计算:  output = Kp*e + Ki*∫e + Kd*de/dt
-     *   3. 幅度限制: clamp(output, SET_FREQ_MIN, 最大频率)
-     *   4. 输出频率: Compressor_SetFreq(output)
+     * 此处保留: 温控任务仍可在此做快速安全检查
      */
-
-    SysVarData_t sensor;
-    SysState_GetSensor(&sensor);
-
-    float delta_t = sensor.VAR_CABINET_TEMP - SET_TEMP_TS;
-
-    /* 简化框架: 后续由逻辑图4完善 */
-    float target_freq = SET_FREQ_INIT;  /* 占位 */
-
-    /* 频率下限保护 */
-    if (target_freq < SET_FREQ_MIN) {
-        target_freq = SET_FREQ_MIN;
-    }
-
-    Compressor_SetFreq(target_freq);
 }
 
 
