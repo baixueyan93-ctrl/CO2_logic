@@ -4,6 +4,7 @@
 #include "cmsis_os.h"
 #include "bsp_eeprom.h"
 #include "bsp_rs485.h"
+#include "bsp_htc_2k.h"
 #include "sys_state.h"
 #include "rtc.h"
 #include "task_adc.h"
@@ -12,6 +13,9 @@
 
 extern UART_HandleTypeDef huart4;
 extern osMutexId EEPROM_MutexHandle;
+
+/* KEY 调试模式标志 */
+static volatile uint8_t s_key_debug = 0;  /* 0=关, 1=开 */
 
 // ==========================================
 // ���ڽ��ջ�����
@@ -93,20 +97,43 @@ void Task_RS485Log_Process(void const *argument) {
             if(strstr((char *)rx_buffer, "GET") != NULL) {
     SysVarData_t current_data;
     SysState_GetSensor(&current_data);
+    char msg[256];
 
-    char reply_msg[256];
-    /* 第1行: 温度传感器 */
-    sprintf(reply_msg, "T_Evap(10K):%.1f | T_Exh(50K):%.1f | SHT30: %.1fC %.1f%%RH\r\n",
-            current_data.VAR_EVAP_TEMP, current_data.VAR_EXHAUST_TEMP,
+    BSP_RS485_SendString("\r\n===== SENSOR DATA =====\r\n");
+
+    /* 5路NTC温度 (全部ADC通道) */
+    sprintf(msg, "NTC INUI4(10K):%.1fC  INUI5(50K):%.1fC  INUI0(10K):%.1fC\r\n",
+            g_temp_inui4_10k, g_temp_inui5_50k, g_temp_inui0_10k);
+    BSP_RS485_SendString(msg);
+    sprintf(msg, "NTC INUI1(10K):%.1fC  INUI6(50K):%.1fC\r\n",
+            g_temp_inui1_10k, g_temp_inui6_50k);
+    BSP_RS485_SendString(msg);
+
+    /* SHT30 */
+    sprintf(msg, "SHT30: %.1fC  %.1f%%RH\r\n",
             current_data.VAR_SHT30_TEMP, current_data.VAR_SHT30_HUMI);
-    BSP_RS485_SendString(reply_msg);
+    BSP_RS485_SendString(msg);
 
-    /* 第2行: 压力传感器 + CO2饱和温度 + 过热度 */
-    sprintf(reply_msg, "P_Low:%.1fbar P_High:%.1fbar | Tsat_L:%.1fC Tsat_H:%.1fC | SH:%.1fC\r\n",
-            current_data.VAR_SUCTION_PRES, current_data.VAR_DISCHARGE_PRES,
+    /* 压力传感器 + CO2饱和温度 */
+    sprintf(msg, "PRES  Low:%.2fbar(%.1fMPa)  High:%.2fbar(%.1fMPa)\r\n",
+            current_data.VAR_SUCTION_PRES, current_data.VAR_SUCTION_PRES*0.1f,
+            current_data.VAR_DISCHARGE_PRES, current_data.VAR_DISCHARGE_PRES*0.1f);
+    BSP_RS485_SendString(msg);
+    sprintf(msg, "CO2sat Low:%.1fC  High:%.1fC  Superheat:%.1fC\r\n",
             current_data.VAR_SUCTION_TEMP, current_data.VAR_COND_TEMP,
             current_data.VAR_SUPERHEAT);
-    BSP_RS485_SendString(reply_msg);
+    BSP_RS485_SendString(msg);
+
+    BSP_RS485_SendString("=======================\r\n");
+}
+            /* KEY — 开启/关闭 按键调试模式 */
+            else if(strstr((char *)rx_buffer, "KEY") != NULL) {
+                s_key_debug = !s_key_debug;
+                if (s_key_debug) {
+                    BSP_RS485_SendString("KEY debug ON - press any key on PANEL0/PANEL1...\r\n");
+                } else {
+                    BSP_RS485_SendString("KEY debug OFF\r\n");
+                }
 }
             // 2. ���� TEST ָ��
             else if(strstr((char *)rx_buffer, "TEST") != NULL) {
@@ -208,7 +235,23 @@ void Task_RS485Log_Process(void const *argument) {
             HAL_UART_Receive_IT(&huart4, &rx_byte, 1); 
         }
         
-        // û�¸ɾ�˯ 50ms����ռ CPU
+        /* KEY 调试模式: 持续扫描两个面板的按键并打印 */
+        if (s_key_debug) {
+            char kmsg[64];
+            uint8_t k0 = HTC2K_ReadKeys();
+            uint8_t k1 = HTC2K_ReadKeys1();
+            if (k0 != 0x00 && k0 != 0xFF) {
+                sprintf(kmsg, "[PANEL0] key=0x%02X\r\n", k0);
+                BSP_RS485_SendString(kmsg);
+                osDelay(200);
+            }
+            if (k1 != 0x00 && k1 != 0xFF) {
+                sprintf(kmsg, "[PANEL1] key=0x%02X\r\n", k1);
+                BSP_RS485_SendString(kmsg);
+                osDelay(200);
+            }
+        }
+
         osDelay(50);
     }
 }
