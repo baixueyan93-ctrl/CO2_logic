@@ -9,19 +9,23 @@
 extern ADC_HandleTypeDef hadc1;
 
 /* DMA 缓冲区, 按 Rank 顺序:
- *   [0] = INUI4  PC3  CH13  10K NTC
- *   [1] = INUI5  PC2  CH12  50K NTC
- *   [2] = INUI0  PA3  CH3   10K NTC
- *   [3] = INUI1  PA2  CH2   10K NTC
- *   [4] = INUI6  PC1  CH11  50K NTC
+ *   [0] = INUI4    PC3  CH13  10K NTC
+ *   [1] = INUI5    PC2  CH12  50K NTC
+ *   [2] = INUI0    PA3  CH3   10K NTC
+ *   [3] = INUI1    PA2  CH2   10K NTC
+ *   [4] = INUI6    PC1  CH11  50K NTC
+ *   [5] = AN5VIN0  PA7  CH7   Low pressure  (SANHUA YCQB09L02, 0~9MPa)
+ *   [6] = AN5VIN1  PC4  CH14  High pressure (SANHUA YCQB15L01, 0~15MPa)
  */
-volatile uint16_t adc_buffer[5] = {0};
+volatile uint16_t adc_buffer[7] = {0};
 
 float g_temp_inui4_10k = 0.0f;
 float g_temp_inui5_50k = 0.0f;
 float g_temp_inui0_10k = 0.0f;
 float g_temp_inui1_10k = 0.0f;
 float g_temp_inui6_50k = 0.0f;
+float g_pres_low  = 0.0f;
+float g_pres_high = 0.0f;
 
 /* ==========================================================
  * 10K NTC 转换函数
@@ -76,10 +80,69 @@ int16_t adc_to_temperature_50k(uint16_t adc_value) {
 }
 
 /* ==========================================================
- * ADC采集线程, 持续刷新温度
+ * 压力传感器 ADC → 压力值 (bar)
+ *
+ * 硬件电路 (原理图 V13 Page2 "ImportPre"):
+ *   传感器输出 (0.5~4.5V 或 0.5~3.5V, 5V供电)
+ *     → R_upper (5.1kΩ) → MCU ADC引脚
+ *                              │
+ *                          R_lower (3.3kΩ) → VSSA
+ *
+ *   分压比 K = R_lower / (R_upper + R_lower) = 3.3/8.4 = 0.3929
+ *   还原传感器电压: V_sensor = V_adc / K
+ *
+ * 传感器规格 (三花SANHUA):
+ *   高压 YCQB15L01: Vout 0.5~4.5V, P 0~15MPa (0~150bar)
+ *   低压 YCQB09L02: Vout 0.5~3.5V, P 0~9MPa  (0~90bar)
+ *
+ * 线性关系: P = (V_sensor - V_ZERO) / (V_FULL - V_ZERO) × P_MAX
+ * ========================================================== */
+
+/* 分压电阻参数 */
+#define PRES_R_UPPER        5100.0f     /* 上臂电阻 5.1kΩ */
+#define PRES_R_LOWER        3300.0f     /* 下臂电阻 3.3kΩ */
+#define PRES_DIV_RATIO      (PRES_R_LOWER / (PRES_R_UPPER + PRES_R_LOWER))  /* 0.3929 */
+
+/* 传感器通用参数 */
+#define PRES_V_ZERO         0.5f        /* 零压力输出电压 (V) */
+
+/* 高压传感器参数 */
+#define PRES_HIGH_V_FULL    4.5f        /* 满量程输出电压 (V) */
+#define PRES_HIGH_MAX_BAR   150.0f      /* 满量程压力 15MPa = 150bar */
+
+/* 低压传感器参数 */
+#define PRES_LOW_V_FULL     3.5f        /* 满量程输出电压 (V) */
+#define PRES_LOW_MAX_BAR    90.0f       /* 满量程压力 9MPa = 90bar */
+
+static float adc_to_pressure(uint16_t adc_value, float v_full, float p_max_bar)
+{
+    const float V_REF = 3.3f;
+    const uint16_t ADC_MAX = 4095;
+
+    if (adc_value > ADC_MAX) adc_value = ADC_MAX;
+
+    /* ADC值 → MCU引脚电压 */
+    float v_adc = (adc_value * V_REF) / ADC_MAX;
+
+    /* 还原传感器实际输出电压 (除以分压比) */
+    float v_sensor = v_adc / PRES_DIV_RATIO;
+
+    /* 传感器电压 → 压力 (bar) */
+    float pressure = (v_sensor - PRES_V_ZERO) / (v_full - PRES_V_ZERO) * p_max_bar;
+
+    /* 下限保护: 传感器断线或电压低于0.5V时钳位到0 */
+    if (pressure < 0.0f) pressure = 0.0f;
+    /* 上限保护: 不超过量程 */
+    if (pressure > p_max_bar) pressure = p_max_bar;
+
+    return pressure;
+}
+
+/* ==========================================================
+ * ADC采集线程, 持续刷新温度和压力
  * ========================================================== */
 void Task_ADC_Process(void const *argument) {
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, 5);
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, 7);
     vTaskDelay(pdMS_TO_TICKS(500));
 
     for(;;) {
@@ -90,29 +153,33 @@ void Task_ADC_Process(void const *argument) {
         int16_t t_inui1 = adc_to_temperature_10k(adc_buffer[3]);  /* INUI1 PA2 10K */
         int16_t t_inui6 = adc_to_temperature_50k(adc_buffer[4]);  /* INUI6 PC1 50K */
 
-        /* 2. 更新全局温度变量 (单位 °C) */
+        /* 2. 转换2路压力传感器 */
+        float pres_l = adc_to_pressure(adc_buffer[5],
+                                       PRES_LOW_V_FULL, PRES_LOW_MAX_BAR);   /* 低压 PA7 */
+        float pres_h = adc_to_pressure(adc_buffer[6],
+                                       PRES_HIGH_V_FULL, PRES_HIGH_MAX_BAR); /* 高压 PC4 */
+
+        /* 3. 更新全局变量 */
         g_temp_inui4_10k = t_inui4 / 10.0f;
         g_temp_inui5_50k = t_inui5 / 10.0f;
         g_temp_inui0_10k = t_inui0 / 10.0f;
         g_temp_inui1_10k = t_inui1 / 10.0f;
         g_temp_inui6_50k = t_inui6 / 10.0f;
+        g_pres_low  = pres_l;
+        g_pres_high = pres_h;
 
-        /* 3. 写入系统状态 (互斥保护)
-         *    TODO: 确认每路传感器对应的物理量后再分配
-         *    目前保持原有映射: INUI4→柜温/蒸发温度, INUI5→排气温度
-         */
+        /* 4. 写入系统状态 (互斥保护) */
         SysState_Lock();
-        SysState_GetRawPtr()->VAR_CABINET_TEMP = g_temp_inui4_10k;
-        SysState_GetRawPtr()->VAR_EVAP_TEMP    = g_temp_inui4_10k;
-        SysState_GetRawPtr()->VAR_EXHAUST_TEMP = g_temp_inui5_50k;
-        /* 新增3路暂不映射, 等确认用途后再分配:
-         *   g_temp_inui0_10k (INUI0 PA3) → ?
-         *   g_temp_inui1_10k (INUI1 PA2) → ?
-         *   g_temp_inui6_50k (INUI6 PC1) → ?
-         */
+        /* 温度 (保持原有映射, 等确认用途后再调整) */
+        SysState_GetRawPtr()->VAR_CABINET_TEMP   = g_temp_inui4_10k;
+        SysState_GetRawPtr()->VAR_EVAP_TEMP      = g_temp_inui4_10k;
+        SysState_GetRawPtr()->VAR_EXHAUST_TEMP   = g_temp_inui5_50k;
+        /* 压力 */
+        SysState_GetRawPtr()->VAR_SUCTION_PRES   = g_pres_low;   /* 低压→吸气压力 */
+        SysState_GetRawPtr()->VAR_DISCHARGE_PRES = g_pres_high;  /* 高压→排气压力 */
         SysState_Unlock();
 
-        /* 4. 每 100ms 刷新一次 */
+        /* 5. 每 100ms 刷新一次 */
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
