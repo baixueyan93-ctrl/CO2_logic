@@ -217,14 +217,30 @@ void Defrost_MainProcess(void)
 
         /* ============================================================
          *  Y → 正在除霜中, 判断当前处于哪个阶段
-         *
-         *  正在滴水(加热不停)?
-         *    流程图中"加热不停"的含义:
-         *    加热阶段结束后, 加热器已关闭, 但除霜尚未完成,
-         *    进入滴水阶段等待融水滴干
          * ============================================================ */
 
-        if (sys_bits & ST_DEF_DRIPPING) {
+        /* ---- 手动触发检测 ----
+         * 如果 ST_DEFROST_ACTIVE 已置位, 但既不在加热也不在滴水,
+         * 说明是由面板手动除霜键触发 (只置位了总标志).
+         * 此时需要执行完整的除霜启动序列.
+         */
+        if (!(sys_bits & ST_DEF_HEATING) && !(sys_bits & ST_DEF_DRIPPING)) {
+            /* 手动触发 → 执行与定时触发相同的启动序列 */
+            Defrost_StopCompressor();
+
+            xEventGroupSetBits(SysEventGroup, ST_DEF_HEATING);
+
+            g_TimerData.TMR_DEF_DUR_CNT = 0;
+            xEventGroupClearBits(SysTimerEventGroup, ST_TMR_DEF_DUR_DONE);
+
+            DefrostHeater_On();
+            Defrost_HeatReset();
+            Defrost_HeatSubroutine();
+            return;
+        }
+
+        /* ============================================================
+         *  正在滴水(加热不停)?
             /* ========================================================
              *  Y → 当前处于[滴水阶段]
              *
