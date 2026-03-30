@@ -213,8 +213,7 @@ void Task_ADC_Process(void const *argument) {
 
         /* 6. 写入系统状态 (互斥保护) */
         SysState_Lock();
-        /* 温度 (保持原有映射, 等确认用途后再调整) */
-        SysState_GetRawPtr()->VAR_CABINET_TEMP   = g_temp_inui4_10k;
+        /* 温度: 柜温由SHT30任务写入, 这里不覆盖 VAR_CABINET_TEMP */
         SysState_GetRawPtr()->VAR_EVAP_TEMP      = g_temp_inui4_10k;
         SysState_GetRawPtr()->VAR_EXHAUST_TEMP   = g_temp_inui5_50k;
         /* 压力 */
