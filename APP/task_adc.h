@@ -17,6 +17,9 @@ extern float g_pres_high;        /* AN5VIN1 PC4  高压 SANHUA YCQB15L01 0~15MPa
 #define g_temp_10k  g_temp_inui4_10k
 #define g_temp_50k  g_temp_inui5_50k
 
+/* CO2 饱和压力→饱和温度 转换 (供外部模块调用) */
+float CO2_PressureToSatTemp(float pressure_bar);
+
 void Task_ADC_Process(void const *argument);
 
 #endif
