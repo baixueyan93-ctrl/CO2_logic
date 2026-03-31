@@ -41,6 +41,7 @@
 #include "task_timer_svc.h" // ��ʱ�жϷ��� (�߼�ͼ5)
 #include "task_cond_fan.h"  // ������(3̨)���� (�߼�ͼ6)
 #include "bsp_i2c_mutex.h" // I2C1 ���߻�����
+#include "bsp_relay.h"    // 6路继电器驱动
 #include "sys_state.h"    // ����ϵͳ״̬ͷ�ļ�
 /* USER CODE END Includes */
 
@@ -131,6 +132,7 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_MUTEX */
   BSP_I2C1_MutexInit();  // �����ȳ�ʼ��Ӳ��������
+  BSP_Relay_Init();      // 继电器GPIO初始化, 上电默认全部OFF
   SysState_Init();       // �����ڵ�������ǰ��ʼ��ȫ�ֱ���ֵ��ϵͳ��
   /* USER CODE END RTOS_MUTEX */
 

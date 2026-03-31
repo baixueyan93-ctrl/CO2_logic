@@ -5,11 +5,13 @@
 #include "bsp_eeprom.h"
 #include "bsp_rs485.h"
 #include "bsp_htc_2k.h"
+#include "bsp_relay.h"
 #include "sys_state.h"
 #include "rtc.h"
 #include "task_adc.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 extern UART_HandleTypeDef huart4;
 extern osMutexId EEPROM_MutexHandle;
@@ -218,6 +220,61 @@ void Task_RS485Log_Process(void const *argument) {
                 }
             }
 						
+            /* RELAY — 继电器控制
+             *   RELAY           → 查询全部继电器状态
+             *   RELAY 0 ON      → 打开蒸发风扇(K1)
+             *   RELAY 3 OFF     → 关闭滑油热丝(K2)
+             *   RELAY ALL OFF   → 全部关闭
+             *   RELAY ALL ON    → 全部打开
+             *   编号: 0=蒸发风扇 1=冷凝风扇 2=化霜热丝 3=滑油热丝 4=凝露热丝 5=照明
+             */
+            else if(strstr((char *)rx_buffer, "RELAY") != NULL) {
+                char rmsg[128];
+                char *p = strstr((char *)rx_buffer, "RELAY") + 5;
+
+                /* 跳过空格 */
+                while (*p == ' ') p++;
+
+                if (strncmp(p, "ALL", 3) == 0) {
+                    p += 3;
+                    while (*p == ' ') p++;
+                    if (strncmp(p, "ON", 2) == 0) {
+                        for (int i = 0; i < RELAY_COUNT; i++) BSP_Relay_On((Relay_ID)i);
+                        BSP_RS485_SendString("ALL relays ON\r\n");
+                    } else {
+                        BSP_Relay_AllOff();
+                        BSP_RS485_SendString("ALL relays OFF\r\n");
+                    }
+                } else if (*p >= '0' && *p <= '5') {
+                    int id = *p - '0';
+                    p++;
+                    while (*p == ' ') p++;
+                    if (strncmp(p, "ON", 2) == 0) {
+                        BSP_Relay_On((Relay_ID)id);
+                        sprintf(rmsg, "%s(K%d) → ON\r\n", BSP_Relay_Name((Relay_ID)id), id);
+                        BSP_RS485_SendString(rmsg);
+                    } else if (strncmp(p, "OFF", 3) == 0) {
+                        BSP_Relay_Off((Relay_ID)id);
+                        sprintf(rmsg, "%s(K%d) → OFF\r\n", BSP_Relay_Name((Relay_ID)id), id);
+                        BSP_RS485_SendString(rmsg);
+                    } else {
+                        /* 查询单个 */
+                        sprintf(rmsg, "%s(K%d): %s\r\n", BSP_Relay_Name((Relay_ID)id), id,
+                                BSP_Relay_GetState((Relay_ID)id) ? "ON" : "OFF");
+                        BSP_RS485_SendString(rmsg);
+                    }
+                } else {
+                    /* 无参数 — 查询全部状态 */
+                    BSP_RS485_SendString("\r\n=== RELAY STATUS ===\r\n");
+                    for (int i = 0; i < RELAY_COUNT; i++) {
+                        sprintf(rmsg, "  [%d] %-8s : %s\r\n", i, BSP_Relay_Name((Relay_ID)i),
+                                BSP_Relay_GetState((Relay_ID)i) ? "ON" : "OFF");
+                        BSP_RS485_SendString(rmsg);
+                    }
+                    BSP_RS485_SendString("====================\r\n");
+                }
+            }
+
             // ������ϣ���ջ����������¿�ʼ����
             rx_index = 0;
             memset(rx_buffer, 0, sizeof(rx_buffer));
