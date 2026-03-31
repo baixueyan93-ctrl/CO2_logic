@@ -235,11 +235,8 @@ void Task_Panel1_Process(void const *argument)
         /* ============================================
          * 显示
          * ============================================ */
-        if (g_panel_mode == 0) {
-            HTC2K_ShowTemp1(sensor.VAR_CABINET_TEMP);
-        } else {
-            HTC2K_ShowTemp1(g_set_temp);
-        }
+        /* 正常模式和设置模式都显示目标温度 (PANEL1不显示柜温) */
+        HTC2K_ShowTemp1(g_set_temp);
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }
