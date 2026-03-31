@@ -2,30 +2,18 @@
 #define __TASK_PANEL_H
 
 /* ===========================================================================
- * 双面板任务
+ * 面板总任务 — 一个任务同时驱动 PANEL0 + PANEL1
  *
- * PANEL0: 纯显示面板 (无按键)
- *   - 柜温显示
- *   - 除霜图标 (Def)
- *   - 满水图标 (Humi)
- *   - 蒸发风机图标 (Fan)
- *   - 报警指示 (Ref 闪烁)
+ * PANEL0: 纯显示面板 (PB6/PB7, 无按键)
+ *   - SHT-30 温度显示
+ *   - 除霜/满水/风机/报警图标
  *
- * PANEL1: 操作面板 (8按键 + 显示)
- *   1. Reset键     一键复位
- *   2. Set键       设置目标温度
- *   3. 调温上键    设置温度及翻页
- *   4. 调温下键    设置温度及翻页
- *   5. 一键除霜键  手动除霜
- *   6. 照明键      照明灯手动开关
- *   7. 点检键      保留键
- *   8. 电源开关键  系统电源开关
+ * PANEL1: 操作面板 (PB4/PB5, 8按键 + 显示)
+ *   - 正常模式: 显示 SHT-30 环境温度
+ *   - 设置模式: 显示/调节目标温度
+ *   - 8按键: Reset/Set/Up/Down/Defrost/Light/Inspect/Power
  * =========================================================================== */
 
-void Task_Panel0_Process(void const *argument);  /* PANEL0 显示任务 */
-void Task_Panel1_Process(void const *argument);  /* PANEL1 操作任务 */
-
-/* 兼容旧接口: 默认调用 PANEL0 + PANEL1 */
 void Task_Panel_Process(void const *argument);
 
 #endif

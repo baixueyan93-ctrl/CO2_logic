@@ -76,7 +76,6 @@ osThreadId Task_EvapFanHandle;
 osThreadId Task_FreqExvHandle;
 osThreadId Task_TimerSvcHandle;
 osThreadId Task_CondFanHandle;
-osThreadId Task_Panel1Handle;
 osMutexId EEPROM_MutexHandle;
 
 /* Private function prototypes -----------------------------------------------*/
@@ -96,7 +95,6 @@ void StartTask_EvapFan(void const * argument);
 void StartTask_FreqExv(void const * argument);
 void StartTask_TimerSvc(void const * argument);
 void StartTask_CondFan(void const * argument);
-void StartTask_Panel1(void const * argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -198,9 +196,6 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(Task_CondFan, StartTask_CondFan, osPriorityNormal, 0, 256);
   Task_CondFanHandle = osThreadCreate(osThread(Task_CondFan), NULL);
 
-  /* PANEL1 操作面板任务 (8按键+显示, PB4/PB5, 低优先级, 512栈) */
-  osThreadDef(Task_Panel1, StartTask_Panel1, osPriorityBelowNormal, 0, 512);
-  Task_Panel1Handle = osThreadCreate(osThread(Task_Panel1), NULL);
   /* USER CODE END RTOS_THREADS */
 
 }
@@ -328,11 +323,6 @@ void StartTask_TimerSvc(void const * argument)
 void StartTask_CondFan(void const * argument)
 {
   Task_CondFan_Process(argument);
-  for(;;) { osDelay(1); }
-}
-void StartTask_Panel1(void const * argument)
-{
-  Task_Panel1_Process(argument);
   for(;;) { osDelay(1); }
 }
 /* USER CODE END Application */
