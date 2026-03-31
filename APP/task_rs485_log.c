@@ -121,6 +121,14 @@ void Task_RS485Log_Process(void const *argument) {
             current_data.VAR_SUCTION_PRES, current_data.VAR_SUCTION_PRES*0.1f,
             current_data.VAR_DISCHARGE_PRES, current_data.VAR_DISCHARGE_PRES*0.1f);
     BSP_RS485_SendString(msg);
+
+    /* ADC原始值 + MCU引脚电压 (用于校准分压电阻) */
+    float v_low  = adc_buffer[5] * 3.3f / 4095.0f;
+    float v_high = adc_buffer[6] * 3.3f / 4095.0f;
+    sprintf(msg, "ADC_RAW  Low:%u(%.3fV)  High:%u(%.3fV)\r\n",
+            adc_buffer[5], v_low, adc_buffer[6], v_high);
+    BSP_RS485_SendString(msg);
+
     sprintf(msg, "CO2sat Low:%.1fC  High:%.1fC  Superheat:%.1fC\r\n",
             current_data.VAR_SUCTION_TEMP, current_data.VAR_COND_TEMP,
             current_data.VAR_SUPERHEAT);
