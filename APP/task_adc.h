@@ -2,16 +2,25 @@
 #define __TASK_ADC_H
 #include <stdint.h>
 
-/* ADC 通道温度值 (单位 °C) */
-extern float g_temp_inui4_10k;   /* INUI4  PC3  10K NTC (原 g_temp_10k) */
-extern float g_temp_inui5_50k;   /* INUI5  PC2  50K NTC (原 g_temp_50k) */
-extern float g_temp_inui0_10k;   /* INUI0  PA3  10K NTC */
-extern float g_temp_inui1_10k;   /* INUI1  PA2  10K NTC */
-extern float g_temp_inui6_50k;   /* INUI6  PC1  50K NTC */
+/* ===================================================================
+ * ADC 通道温度值 (单位 °C)
+ *
+ * 物理位置 (CO2跨临界循环):
+ *   INUI4(10K) = 压缩机进口      + 低压传感器
+ *   INUI5(50K) = 压缩机出口/气冷器进口 + 高压传感器
+ *   INUI6(50K) = 气体冷却器出口
+ *   INUI0(10K) = 蒸发器进口
+ *   INUI1(10K) = 蒸发器出口 (过热度计算)
+ * =================================================================== */
+extern float g_temp_inui4_10k;   /* INUI4  PC3  10K  压缩机进口温度        */
+extern float g_temp_inui5_50k;   /* INUI5  PC2  50K  压缩机出口/气冷器进口 */
+extern float g_temp_inui0_10k;   /* INUI0  PA3  10K  蒸发器进口温度        */
+extern float g_temp_inui1_10k;   /* INUI1  PA2  10K  蒸发器出口温度        */
+extern float g_temp_inui6_50k;   /* INUI6  PC1  50K  气体冷却器出口温度    */
 
 /* 压力传感器 (单位 bar) */
-extern float g_pres_low;         /* AN5VIN0 PA7  低压 SANHUA YCQB09L02 0~9MPa  */
-extern float g_pres_high;        /* AN5VIN1 PC4  高压 SANHUA YCQB15L01 0~15MPa */
+extern float g_pres_low;         /* AN5VIN0 PA7  低压 0~9MPa  (压缩机进口侧) */
+extern float g_pres_high;        /* AN5VIN1 PC4  高压 0~15MPa (压缩机出口侧) */
 
 /* ADC DMA 原始值 (调试用) */
 extern volatile uint16_t adc_buffer[7];

@@ -103,34 +103,36 @@ void Task_RS485Log_Process(void const *argument) {
 
     BSP_RS485_SendString("\r\n===== SENSOR DATA =====\r\n");
 
-    /* 5路NTC温度 (全部ADC通道) */
-    sprintf(msg, "NTC INUI4(10K):%.1fC  INUI5(50K):%.1fC  INUI0(10K):%.1fC\r\n",
-            g_temp_inui4_10k, g_temp_inui5_50k, g_temp_inui0_10k);
+    /* 5路NTC温度 — 按CO2循环顺序显示 */
+    sprintf(msg, "CompOut(INUI5):%.1fC  GCout(INUI6):%.1fC\r\n",
+            current_data.VAR_COMP_OUT_TEMP, current_data.VAR_GC_OUT_TEMP);
     BSP_RS485_SendString(msg);
-    sprintf(msg, "NTC INUI1(10K):%.1fC  INUI6(50K):%.1fC\r\n",
-            g_temp_inui1_10k, g_temp_inui6_50k);
-    BSP_RS485_SendString(msg);
-
-    /* SHT30 */
-    sprintf(msg, "SHT30: %.1fC  %.1f%%RH\r\n",
-            current_data.VAR_SHT30_TEMP, current_data.VAR_SHT30_HUMI);
+    sprintf(msg, "EvapIn(INUI0):%.1fC  EvapOut(INUI1):%.1fC  CompIn(INUI4):%.1fC\r\n",
+            current_data.VAR_EVAP_IN_TEMP, current_data.VAR_EVAP_OUT_TEMP,
+            current_data.VAR_COMP_IN_TEMP);
     BSP_RS485_SendString(msg);
 
-    /* 压力传感器 + CO2饱和温度 */
-    sprintf(msg, "PRES  Low:%.2fbar(%.1fMPa)  High:%.2fbar(%.1fMPa)\r\n",
+    /* SHT30 箱体温度 */
+    sprintf(msg, "Cabinet(SHT30):%.1fC  Humi:%.1f%%RH\r\n",
+            current_data.VAR_CABINET_TEMP, current_data.VAR_SHT30_HUMI);
+    BSP_RS485_SendString(msg);
+
+    /* 压力传感器 */
+    sprintf(msg, "PRES  Low:%.2fbar(%.2fMPa)  High:%.2fbar(%.2fMPa)\r\n",
             current_data.VAR_SUCTION_PRES, current_data.VAR_SUCTION_PRES*0.1f,
             current_data.VAR_DISCHARGE_PRES, current_data.VAR_DISCHARGE_PRES*0.1f);
     BSP_RS485_SendString(msg);
 
-    /* ADC原始值 + MCU引脚电压 (用于校准分压电阻) */
+    /* ADC原始值 (调试用) */
     float v_low  = adc_buffer[5] * 3.3f / 4095.0f;
     float v_high = adc_buffer[6] * 3.3f / 4095.0f;
     sprintf(msg, "ADC_RAW  Low:%u(%.3fV)  High:%u(%.3fV)\r\n",
             adc_buffer[5], v_low, adc_buffer[6], v_high);
     BSP_RS485_SendString(msg);
 
+    /* CO2饱和温度 + 过热度 */
     sprintf(msg, "CO2sat Low:%.1fC  High:%.1fC  Superheat:%.1fC\r\n",
-            current_data.VAR_SUCTION_TEMP, current_data.VAR_COND_TEMP,
+            current_data.VAR_SAT_TEMP_LOW, current_data.VAR_SAT_TEMP_HIGH,
             current_data.VAR_SUPERHEAT);
     BSP_RS485_SendString(msg);
 

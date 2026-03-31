@@ -174,6 +174,14 @@ static float adc_to_pressure(uint16_t adc_value, float v_full, float p_max_bar)
 
 /* ==========================================================
  * ADC采集线程, 持续刷新温度和压力
+ *
+ * 传感器物理位置 (CO2跨临界循环):
+ *   INUI4(10K) → 压缩机进口温度      + 低压传感器
+ *   INUI5(50K) → 压缩机出口/气冷器进口温度 + 高压传感器
+ *   INUI6(50K) → 气体冷却器出口温度
+ *   INUI0(10K) → 蒸发器进口温度
+ *   INUI1(10K) → 蒸发器出口温度 (过热度计算用)
+ *   SHT30      → 箱体/柜温 (由task_sht30写入)
  * ========================================================== */
 void Task_ADC_Process(void const *argument) {
     HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, 7);
@@ -181,48 +189,64 @@ void Task_ADC_Process(void const *argument) {
 
     for(;;) {
         /* 1. 转换全部5路温度 */
-        int16_t t_inui4 = adc_to_temperature_10k(adc_buffer[0]);  /* INUI4 PC3 10K */
-        int16_t t_inui5 = adc_to_temperature_50k(adc_buffer[1]);  /* INUI5 PC2 50K */
-        int16_t t_inui0 = adc_to_temperature_10k(adc_buffer[2]);  /* INUI0 PA3 10K */
-        int16_t t_inui1 = adc_to_temperature_10k(adc_buffer[3]);  /* INUI1 PA2 10K */
-        int16_t t_inui6 = adc_to_temperature_50k(adc_buffer[4]);  /* INUI6 PC1 50K */
+        int16_t t_inui4 = adc_to_temperature_10k(adc_buffer[0]);  /* INUI4 PC3 10K 压缩机进口 */
+        int16_t t_inui5 = adc_to_temperature_50k(adc_buffer[1]);  /* INUI5 PC2 50K 压缩机出口/气冷器进口 */
+        int16_t t_inui0 = adc_to_temperature_10k(adc_buffer[2]);  /* INUI0 PA3 10K 蒸发器进口 */
+        int16_t t_inui1 = adc_to_temperature_10k(adc_buffer[3]);  /* INUI1 PA2 10K 蒸发器出口 */
+        int16_t t_inui6 = adc_to_temperature_50k(adc_buffer[4]);  /* INUI6 PC1 50K 气冷器出口 */
 
         /* 2. 转换2路压力传感器 */
         float pres_l = adc_to_pressure(adc_buffer[5],
-                                       PRES_LOW_V_FULL, PRES_LOW_MAX_BAR);   /* 低压 PA7 */
+                                       PRES_LOW_V_FULL, PRES_LOW_MAX_BAR);   /* 低压 PA7 (压缩机进口侧) */
         float pres_h = adc_to_pressure(adc_buffer[6],
-                                       PRES_HIGH_V_FULL, PRES_HIGH_MAX_BAR); /* 高压 PC4 */
+                                       PRES_HIGH_V_FULL, PRES_HIGH_MAX_BAR); /* 高压 PC4 (压缩机出口侧) */
 
         /* 3. CO2 饱和温度计算 (压力→温度, 多项式拟合) */
-        float sat_temp_low  = co2_pressure_to_sat_temp(pres_l);  /* 低压饱和温度 (蒸发温度) */
-        float sat_temp_high = co2_pressure_to_sat_temp(pres_h);  /* 高压饱和温度 (冷凝温度) */
+        float sat_temp_low  = co2_pressure_to_sat_temp(pres_l);  /* 低压饱和温度 */
+        float sat_temp_high = co2_pressure_to_sat_temp(pres_h);  /* 高压饱和温度 */
 
-        /* 4. 过热度 = 吸气实测温度 - 低压饱和温度 */
-        float suction_temp_actual = t_inui5 / 10.0f;  /* INUI5 50K NTC 作为吸气温度传感器 */
-        float superheat = suction_temp_actual - sat_temp_low;
+        /* 4. 过热度 = 蒸发器出口实测温度(INUI1) - 低压饱和温度 */
+        float evap_out_actual = t_inui1 / 10.0f;  /* INUI1 10K = 蒸发器出口 */
+        float superheat = evap_out_actual - sat_temp_low;
         if (superheat < 0.0f) superheat = 0.0f;
 
-        /* 5. 更新全局变量 */
-        g_temp_inui4_10k = t_inui4 / 10.0f;
-        g_temp_inui5_50k = t_inui5 / 10.0f;
-        g_temp_inui0_10k = t_inui0 / 10.0f;
-        g_temp_inui1_10k = t_inui1 / 10.0f;
-        g_temp_inui6_50k = t_inui6 / 10.0f;
+        /* 5. 更新全局变量 (供RS485调试输出) */
+        g_temp_inui4_10k = t_inui4 / 10.0f;  /* 压缩机进口 */
+        g_temp_inui5_50k = t_inui5 / 10.0f;  /* 压缩机出口/气冷器进口 */
+        g_temp_inui0_10k = t_inui0 / 10.0f;  /* 蒸发器进口 */
+        g_temp_inui1_10k = t_inui1 / 10.0f;  /* 蒸发器出口 */
+        g_temp_inui6_50k = t_inui6 / 10.0f;  /* 气冷器出口 */
         g_pres_low  = pres_l;
         g_pres_high = pres_h;
 
         /* 6. 写入系统状态 (互斥保护) */
         SysState_Lock();
-        /* 温度: 柜温由SHT30任务写入, 这里不覆盖 VAR_CABINET_TEMP */
-        SysState_GetRawPtr()->VAR_EVAP_TEMP      = g_temp_inui4_10k;
-        SysState_GetRawPtr()->VAR_EXHAUST_TEMP   = g_temp_inui5_50k;
-        /* 压力 */
-        SysState_GetRawPtr()->VAR_SUCTION_PRES   = g_pres_low;   /* 低压→吸气压力 */
-        SysState_GetRawPtr()->VAR_DISCHARGE_PRES = g_pres_high;  /* 高压→排气压力 */
-        /* CO2 饱和温度 (由压力通过多项式拟合转换) */
-        SysState_GetRawPtr()->VAR_SUCTION_TEMP   = sat_temp_low;  /* 低压饱和温度→吸气温度 */
-        SysState_GetRawPtr()->VAR_COND_TEMP      = sat_temp_high; /* 高压饱和温度→冷凝温度 */
-        SysState_GetRawPtr()->VAR_SUPERHEAT       = superheat;    /* 过热度 */
+        SysVarData_t *p = SysState_GetRawPtr();
+
+        /* --- 5路NTC → 新字段 (按循环位置) --- */
+        p->VAR_COMP_OUT_TEMP  = g_temp_inui5_50k;  /* INUI5 压缩机出口/气冷器进口 */
+        p->VAR_GC_OUT_TEMP    = g_temp_inui6_50k;  /* INUI6 气体冷却器出口 */
+        p->VAR_EVAP_IN_TEMP   = g_temp_inui0_10k;  /* INUI0 蒸发器进口 */
+        p->VAR_EVAP_OUT_TEMP  = g_temp_inui1_10k;  /* INUI1 蒸发器出口 */
+        p->VAR_COMP_IN_TEMP   = g_temp_inui4_10k;  /* INUI4 压缩机进口 */
+
+        /* --- 压力 --- */
+        p->VAR_SUCTION_PRES   = pres_l;             /* 低压 (压缩机进口侧) */
+        p->VAR_DISCHARGE_PRES = pres_h;             /* 高压 (压缩机出口侧) */
+
+        /* --- CO2 饱和温度 --- */
+        p->VAR_SAT_TEMP_LOW   = sat_temp_low;       /* 低压饱和温度 */
+        p->VAR_SAT_TEMP_HIGH  = sat_temp_high;      /* 高压饱和温度 */
+
+        /* --- 计算量 --- */
+        p->VAR_SUPERHEAT      = superheat;           /* 过热度 */
+
+        /* --- 兼容旧字段 (逻辑任务启用后逐步淘汰) --- */
+        p->VAR_EXHAUST_TEMP   = g_temp_inui5_50k;   /* 旧名=排气温度 */
+        p->VAR_SUCTION_TEMP   = sat_temp_low;        /* 旧名=吸气温度(实为饱和温度) */
+        p->VAR_COND_TEMP      = sat_temp_high;       /* 旧名=冷凝温度(实为饱和温度) */
+        p->VAR_EVAP_TEMP      = g_temp_inui0_10k;   /* 旧名=蒸发温度 */
+
         SysState_Unlock();
 
         /* 7. 每 100ms 刷新一次 */
