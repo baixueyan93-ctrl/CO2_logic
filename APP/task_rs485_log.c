@@ -309,6 +309,19 @@ void Task_RS485Log_Process(void const *argument) {
             }
         }
 
+        /* ============================================
+         * UART 接收状态守护: 防止 Overrun/Noise/Frame 错误
+         * 导致 HAL 接收中断永久停止
+         * ============================================ */
+        if (huart4.RxState != HAL_UART_STATE_BUSY_RX) {
+            __HAL_UART_CLEAR_OREFLAG(&huart4);
+            __HAL_UART_CLEAR_NEFLAG(&huart4);
+            __HAL_UART_CLEAR_FEFLAG(&huart4);
+            huart4.ErrorCode = HAL_UART_ERROR_NONE;
+            huart4.RxState   = HAL_UART_STATE_READY;
+            HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
+        }
+
         osDelay(50);
     }
 }
