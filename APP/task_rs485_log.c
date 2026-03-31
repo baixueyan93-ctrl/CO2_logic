@@ -4,48 +4,54 @@
 #include "cmsis_os.h"
 #include "bsp_eeprom.h"
 #include "bsp_rs485.h"
+#include "bsp_htc_2k.h"
+#include "bsp_relay.h"
 #include "sys_state.h"
 #include "rtc.h"
 #include "task_adc.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 extern UART_HandleTypeDef huart4;
 extern osMutexId EEPROM_MutexHandle;
 
-// ==========================================
-// ´®¿Ú½ÓÊÕ»º³åÇø
-// ==========================================
-uint8_t rx_byte;           // Ã¿´ÎÖ»ÊÕ1¸ö×Ö½Ú
-uint8_t rx_buffer[128];    // ÍêÕû×Ö·û´®»º³åÇø
-uint16_t rx_index = 0;     // µ±Ç°´æµ½ÁËµÚ¼¸¸ö
-volatile uint8_t rx_complete = 0; // ½ÓÊÕÍê³É±êÖ¾ (1±íÊ¾ÊÕÍêÁË)
+/* KEY è°ƒè¯•æ¨¡å¼æ ‡å¿— */
+static volatile uint8_t s_key_debug = 0;  /* 0=å…³, 1=å¼€ */
 
-// HAL ´®¿ÚµÄ½ÓÊÕÖĞ¶Ï»Øµ÷ (Ã¿ÊÕµ½1¸ö×Ö½Ú£¬×Ô¶¯µ÷ÓÃÕâ¸öº¯Êı)
+// ==========================================
+// ï¿½ï¿½ï¿½Ú½ï¿½ï¿½Õ»ï¿½ï¿½ï¿½ï¿½ï¿½
+// ==========================================
+uint8_t rx_byte;           // Ã¿ï¿½ï¿½Ö»ï¿½ï¿½1ï¿½ï¿½ï¿½Ö½ï¿½
+uint8_t rx_buffer[128];    // ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+uint16_t rx_index = 0;     // ï¿½ï¿½Ç°ï¿½æµ½ï¿½ËµÚ¼ï¿½ï¿½ï¿½
+volatile uint8_t rx_complete = 0; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É±ï¿½Ö¾ (1ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
+
+// HAL ï¿½ï¿½ï¿½ÚµÄ½ï¿½ï¿½ï¿½ï¿½Ğ¶Ï»Øµï¿½ (Ã¿ï¿½Õµï¿½1ï¿½ï¿½ï¿½Ö½Ú£ï¿½ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if(huart->Instance == UART4) {
         rx_buffer[rx_index++] = rx_byte;
         
-        // Èç¹ûÊÕµ½»Ø³µ»»ĞĞ£¬»òÕß»º³åÇø¿ì×°ÂúÁË£¬ÈÏÎªÊÕµ½ÁËÒ»ÌõÍêÕûÖ¸Áî
+        // ï¿½ï¿½ï¿½ï¿½Õµï¿½ï¿½Ø³ï¿½ï¿½ï¿½ï¿½Ğ£ï¿½ï¿½ï¿½ï¿½ß»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×°ï¿½ï¿½ï¿½Ë£ï¿½ï¿½ï¿½Îªï¿½Õµï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
         if(rx_byte == '\n' || rx_byte == '\r' || rx_index >= 127) {
-            rx_buffer[rx_index] = '\0'; // ¼ÓÉÏ×Ö·û´®½áÎ²
-            rx_complete = 1;            // Í¨ÖªÈÎÎñÈ¥´¦Àí
+            rx_buffer[rx_index] = '\0'; // ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½Î²
+            rx_complete = 1;            // Í¨Öªï¿½ï¿½ï¿½ï¿½È¥ï¿½ï¿½ï¿½ï¿½
         } else {
-            // »¹Ã»ÊÕÍê£¬¾Í¼ÌĞø¼àÌıÏÂÒ»¸ö×Ö½Ú
+            // ï¿½ï¿½Ã»ï¿½ï¿½ï¿½ê£¬ï¿½Í¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ö½ï¿½
             HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
         }
     }
 }
 
 // ==========================================
-// ¹ÊÕÏ¼ÇÂ¼º¯Êı
+// ï¿½ï¿½ï¿½Ï¼ï¿½Â¼ï¿½ï¿½ï¿½ï¿½
 // ==========================================
 uint8_t System_Record_Fault(uint8_t fault_code) {
     SysLog_t new_log = {0};
     RTC_DateTypeDef sDate;
     RTC_TimeTypeDef sTime;
 
-    // 1. »ñÈ¡µ±Ç°µÄ RTC Ê±¼ä´Á
+    // 1. ï¿½ï¿½È¡ï¿½ï¿½Ç°ï¿½ï¿½ RTC Ê±ï¿½ï¿½ï¿½
     HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
     HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
 
@@ -54,15 +60,15 @@ uint8_t System_Record_Fault(uint8_t fault_code) {
     new_log.EventType = fault_code;
 
     // ==========================================
-    // 2. ´ÓÏµÍ³µÄ°²È«ºÚ°åÉÏ³­³ö´«¸ĞÆ÷Êı¾İ
+    // 2. ï¿½ï¿½ÏµÍ³ï¿½Ä°ï¿½È«ï¿½Ú°ï¿½ï¿½Ï³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     // ==========================================
     SysVarData_t current_sensor_data;
     SysState_GetSensor(&current_sensor_data);
 
-    new_log.EvapTemp = current_sensor_data.VAR_EVAP_TEMP;     // 10K Õô·¢ÎÂ¶È
-    new_log.CondTemp = current_sensor_data.VAR_EXHAUST_TEMP;  // 50K ÅÅÆø/ÀäÄıÎÂ¶È 
+    new_log.EvapTemp = current_sensor_data.VAR_EVAP_TEMP;     // 10K ï¿½ï¿½ï¿½ï¿½ï¿½Â¶ï¿½
+    new_log.CondTemp = current_sensor_data.VAR_EXHAUST_TEMP;  // 50K ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ï¿½Â¶ï¿½ 
 
-    // 4. °²È«µØÍù¹ÊÕÏÈÕÖ¾»·Ğ´Èë
+    // 4. ï¿½ï¿½È«ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¾ï¿½ï¿½Ğ´ï¿½ï¿½
     if(osMutexWait(EEPROM_MutexHandle, 500) == osOK) {
         BSP_Log_Add(&new_log); 
         osMutexRelease(EEPROM_MutexHandle); 
@@ -72,7 +78,7 @@ uint8_t System_Record_Fault(uint8_t fault_code) {
 }
 
 // ==========================================
-// ÈÎÎñÖ÷º¯Êı
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 // ==========================================
 void Task_RS485Log_Process(void const *argument) {
     
@@ -82,60 +88,95 @@ void Task_RS485Log_Process(void const *argument) {
     
     BSP_RS485_SendString("\r\n--- Simple Mode Ready! ---\r\n");
     
-    // Æô¶¯µÚÒ»´ÎÖĞ¶Ï½ÓÊÕ (Ö»ÊÕ 1 ¸ö×Ö½Ú)
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ğ¶Ï½ï¿½ï¿½ï¿½ (Ö»ï¿½ï¿½ 1 ï¿½ï¿½ï¿½Ö½ï¿½)
     HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
     
     for(;;) {
-        // Èç¹ûÖĞ¶ÏËµ"ÓĞÖ¸ÁîÀ´ÁË"
+        // ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ëµ"ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½"
         if (rx_complete == 1) {
             
-            // 1. ´¦Àí GET Ö¸Áî
+            // 1. ï¿½ï¿½ï¿½ï¿½ GET Ö¸ï¿½ï¿½
             if(strstr((char *)rx_buffer, "GET") != NULL) {
     SysVarData_t current_data;
-    
-    // ´ÓÏµÍ³µÄ°²È«ºÚ°åÉÏ¶ÁÈ¡´«¸ĞÆ÷Êı¾İ
-    SysState_GetSensor(&current_data); 
-    
-    char reply_msg[128];
-    // ´òÓ¡´Ó½á¹¹ÌåÖĞÈ¡³öµÄÁ½Â·ÎÂ¶È(10K)ºÍÅÅÆøÎÂ¶È(50K)
-    sprintf(reply_msg, "T_Evap(10K):%.1f | T_Exh(50K):%.1f | SHT30: %.1fC %.1f%%RH\r\n", 
-            current_data.VAR_EVAP_TEMP, current_data.VAR_EXHAUST_TEMP,
+    SysState_GetSensor(&current_data);
+    char msg[256];
+
+    BSP_RS485_SendString("\r\n===== SENSOR DATA =====\r\n");
+
+    /* 5è·¯NTCæ¸©åº¦ (å…¨éƒ¨ADCé€šé“) */
+    sprintf(msg, "NTC INUI4(10K):%.1fC  INUI5(50K):%.1fC  INUI0(10K):%.1fC\r\n",
+            g_temp_inui4_10k, g_temp_inui5_50k, g_temp_inui0_10k);
+    BSP_RS485_SendString(msg);
+    sprintf(msg, "NTC INUI1(10K):%.1fC  INUI6(50K):%.1fC\r\n",
+            g_temp_inui1_10k, g_temp_inui6_50k);
+    BSP_RS485_SendString(msg);
+
+    /* SHT30 */
+    sprintf(msg, "SHT30: %.1fC  %.1f%%RH\r\n",
             current_data.VAR_SHT30_TEMP, current_data.VAR_SHT30_HUMI);
-            
-    BSP_RS485_SendString(reply_msg);
+    BSP_RS485_SendString(msg);
+
+    /* å‹åŠ›ä¼ æ„Ÿå™¨ + CO2é¥±å’Œæ¸©åº¦ */
+    sprintf(msg, "PRES  Low:%.2fbar(%.1fMPa)  High:%.2fbar(%.1fMPa)\r\n",
+            current_data.VAR_SUCTION_PRES, current_data.VAR_SUCTION_PRES*0.1f,
+            current_data.VAR_DISCHARGE_PRES, current_data.VAR_DISCHARGE_PRES*0.1f);
+    BSP_RS485_SendString(msg);
+
+    /* ADCåŸå§‹å€¼ + MCUå¼•è„šç”µå‹ (ç”¨äºæ ¡å‡†åˆ†å‹ç”µé˜») */
+    float v_low  = adc_buffer[5] * 3.3f / 4095.0f;
+    float v_high = adc_buffer[6] * 3.3f / 4095.0f;
+    sprintf(msg, "ADC_RAW  Low:%u(%.3fV)  High:%u(%.3fV)\r\n",
+            adc_buffer[5], v_low, adc_buffer[6], v_high);
+    BSP_RS485_SendString(msg);
+
+    sprintf(msg, "CO2sat Low:%.1fC  High:%.1fC  Superheat:%.1fC\r\n",
+            current_data.VAR_SUCTION_TEMP, current_data.VAR_COND_TEMP,
+            current_data.VAR_SUPERHEAT);
+    BSP_RS485_SendString(msg);
+
+    BSP_RS485_SendString("=======================\r\n");
 }
-            // 2. ´¦Àí TEST Ö¸Áî
+            /* KEY â€” å¼€å¯/å…³é—­ æŒ‰é”®è°ƒè¯•æ¨¡å¼ */
+            else if(strstr((char *)rx_buffer, "KEY") != NULL) {
+                s_key_debug = !s_key_debug;
+                if (s_key_debug) {
+                    BSP_RS485_SendString("KEY debug ON - press any key on PANEL0/PANEL1...\r\n");
+                } else {
+                    BSP_RS485_SendString("KEY debug OFF\r\n");
+                }
+}
+            // 2. ï¿½ï¿½ï¿½ï¿½ TEST Ö¸ï¿½ï¿½
             else if(strstr((char *)rx_buffer, "TEST") != NULL) {
                 if(System_Record_Fault(0x99) == 0) BSP_RS485_SendString("Test Saved!\r\n");
             }
-            // 3. ´¦Àí READ Ö¸Áî£¨×Ô¶¯Ö»¶Á×îĞÂµÄ 5 Ìõ£¬×î¶à 20 Ìõ£©
+            // 3. ï¿½ï¿½ï¿½ï¿½ READ Ö¸ï¿½î£¨ï¿½Ô¶ï¿½Ö»ï¿½ï¿½ï¿½ï¿½ï¿½Âµï¿½ 5 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ 20 ï¿½ï¿½ï¿½ï¿½
             else if(strstr((char *)rx_buffer, "READ") != NULL) {
                 BSP_RS485_SendString("\r\n--- LATEST LOG START ---\r\n");
                 
                 if(osMutexWait(EEPROM_MutexHandle, 1000) == osOK) {
                     SysLog_t temp_log;
                     
-                    // »ñÈ¡µ×²ã"Ğ´Ö¸Õë"µÄµ±Ç°Î»ÖÃ
+                    // ï¿½ï¿½È¡ï¿½×²ï¿½"Ğ´Ö¸ï¿½ï¿½"ï¿½Äµï¿½Ç°Î»ï¿½ï¿½
                     uint8_t current_idx = BSP_Log_Get_Current_Index();
                     
-                    // Ä¬ÈÏÏÈÖ»¿´×îĞÂµÄ¼¸Ìõ£¬ÔİÊ±ÒÔ 5 ÌõÎªÀı
+                    // Ä¬ï¿½ï¿½ï¿½ï¿½Ö»ï¿½ï¿½ï¿½ï¿½ï¿½ÂµÄ¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ 5 ï¿½ï¿½Îªï¿½ï¿½
                     uint8_t read_count = 5; 
                     
-                    // ´Ó×îĞÂµÄÒ»Ìõ¿ªÊ¼£¬ÍùÇ°·­
+                    // ï¿½ï¿½ï¿½ï¿½ï¿½Âµï¿½Ò»ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ç°ï¿½ï¿½
                     for(int i = 0; i < read_count; i++) {
                         
-                        // ÓÃµ¹×ÅÊıµÄ»·ĞÎËã·¨ÕÒ
-                        // ÎªÊ²Ã´Òª¼Ó LOG_MAX_COUNT£ºÒòÎªÈç¹û current_idx ÊÇ 0£¬0-1=-1¾Í³ö½çÁË
-                        // ¼ÓÉÏ×î´óÖµÔÙÈ¡Óà£¬ÍêÃÀ½â¾ö»·ĞÎ»ØËİ£º0 µÄÉÏÒ»ÌõÊÇ 126
+                        // ï¿½Ãµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä»ï¿½ï¿½ï¿½ï¿½ã·¨ï¿½ï¿½
+                        // ÎªÊ²Ã´Òªï¿½ï¿½ LOG_MAX_COUNTï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ current_idx ï¿½ï¿½ 0ï¿½ï¿½0-1=-1ï¿½Í³ï¿½ï¿½ï¿½ï¿½ï¿½
+                        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½È¡ï¿½à£¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î»ï¿½ï¿½İ£ï¿½0 ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ 126
                         int physical_idx = (current_idx - 1 - i + LOG_MAX_COUNT) % LOG_MAX_COUNT;
                         
                         BSP_Log_Read_By_Index(physical_idx, &temp_log); 
                         
-                        // ¿ÉÑ¡ÓÅ»¯£ºÈç¹ûÈÕÆÚ³¬³ö·¶Î§»òÕßÊÇ 0£¬ËµÃ÷ÕâÌõ»¹ÊÇÈ«ĞÂµÄ£¨»¹Ã»Ğ´Èë£©£¬¾ÍÌø¹ı
+                        // ï¿½ï¿½Ñ¡ï¿½Å»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú³ï¿½ï¿½ï¿½ï¿½ï¿½Î§ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ 0ï¿½ï¿½Ëµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È«ï¿½ÂµÄ£ï¿½ï¿½ï¿½Ã»Ğ´ï¿½ë£©ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                         if (temp_log.Year == 0) continue; 
                         
                         char log_msg[128];
-                        // ´òÓ¡Ê±¼ä¡¢¹ÊÕÏ´úÂë¡¢µÚ¼¸Ìõ [Newest - 0], [Newest - 1]
+                        // ï¿½ï¿½Ó¡Ê±ï¿½ä¡¢ï¿½ï¿½ï¿½Ï´ï¿½ï¿½ë¡¢ï¿½Ú¼ï¿½ï¿½ï¿½ [Newest - 0], [Newest - 1]
                         sprintf(log_msg, "[Newest-%d] (Idx:%d) 20%02d-%02d-%02d %02d:%02d:%02d | Evt:0x%02X | Temp:%.1f\r\n", 
                                 i, physical_idx, temp_log.Year, temp_log.Month, temp_log.Date,
                                 temp_log.Hours, temp_log.Minutes, temp_log.Seconds,
@@ -148,19 +189,19 @@ void Task_RS485Log_Process(void const *argument) {
                 }
                 BSP_RS485_SendString("--- LATEST LOG END ---\r\n");
             }
-            // 4. ´¦ÀíĞŞ¸ÄÊ±¼äµÄ SETTIME Ö¸Áî
-            // Ô¤ÆÚ¸ñÊ½Àı×Ó: SETTIME:26-03-15,14:30:00 (±íÊ¾ 2026Äê3ÔÂ15ÈÕ 14Ê±30·Ö00Ãë)
+            // 4. ï¿½ï¿½ï¿½ï¿½ï¿½Ş¸ï¿½Ê±ï¿½ï¿½ï¿½ SETTIME Ö¸ï¿½ï¿½
+            // Ô¤ï¿½Ú¸ï¿½Ê½ï¿½ï¿½ï¿½ï¿½: SETTIME:26-03-15,14:30:00 (ï¿½ï¿½Ê¾ 2026ï¿½ï¿½3ï¿½ï¿½15ï¿½ï¿½ 14Ê±30ï¿½ï¿½00ï¿½ï¿½)
             else if(strstr((char *)rx_buffer, "SETTIME") != NULL) {
                 int year, month, date, hour, minute, second;
                 
-                // Ê¹ÓÃ sscanf ´Ó×Ö·û´®ÖĞÌáÈ¡ÈÕÆÚºÍÊ±¼äÖµ
+                // Ê¹ï¿½ï¿½ sscanf ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¡ï¿½ï¿½ï¿½Úºï¿½Ê±ï¿½ï¿½Öµ
                 if (sscanf((char *)rx_buffer, "SETTIME:%d-%d-%d,%d:%d:%d", 
                            &year, &month, &date, &hour, &minute, &second) == 6) {
                     
                     RTC_TimeTypeDef sTime = {0};
                     RTC_DateTypeDef sDate = {0};
                     
-                    // ÉèÖÃÊ±¼ä
+                    // ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½
                     sTime.Hours = hour;
                     sTime.Minutes = minute;
                     sTime.Seconds = second;
@@ -168,13 +209,13 @@ void Task_RS485Log_Process(void const *argument) {
                     sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
                     sTime.StoreOperation = RTC_STOREOPERATION_RESET;
                     
-                    // ÉèÖÃÈÕÆÚ
-                    sDate.WeekDay = RTC_WEEKDAY_MONDAY; // ĞÇÆÚ¼¸×Ô¼ºËã£¬Ó°Ïì²»´ó£¬ÏÈ¸øÖÜÒ»
+                    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+                    sDate.WeekDay = RTC_WEEKDAY_MONDAY; // ï¿½ï¿½ï¿½Ú¼ï¿½ï¿½Ô¼ï¿½ï¿½ã£¬Ó°ï¿½ì²»ï¿½ï¿½ï¿½È¸ï¿½ï¿½ï¿½Ò»
                     sDate.Month = month;
                     sDate.Date = date;
                     sDate.Year = year;
                     
-                    // ¡¾×¢Òâ¡¿ÔÚSTM32ÉÏÓ²¼şÒªÇó±ØĞëÏÈÉè Time£¬ÔÙÉè Date
+                    // ï¿½ï¿½×¢ï¿½â¡¿ï¿½ï¿½STM32ï¿½ï¿½Ó²ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Timeï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Date
                     if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) == HAL_OK &&
                         HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN) == HAL_OK) {
                         BSP_RS485_SendString("RTC Time Updated Successfully!\r\n");
@@ -182,29 +223,113 @@ void Task_RS485Log_Process(void const *argument) {
                         BSP_RS485_SendString("ERROR: RTC Hardware Fault!\r\n");
                     }
                 } else {
-                    // Èç¹ûÓÃ»§¸ñÊ½Ğ´´íÁË£¬ÌáÊ¾ÕıÈ·¸ñÊ½
+                    // ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½Ê½Ğ´ï¿½ï¿½ï¿½Ë£ï¿½ï¿½ï¿½Ê¾ï¿½ï¿½È·ï¿½ï¿½Ê½
                     BSP_RS485_SendString("Format Error! Pls use: SETTIME:YY-MM-DD,HH:MM:SS\r\n");
                 }
             }
 						
-            // ´¦ÀíÍê±Ï£¬Çå¿Õ»º³åÇø£¬ÖØĞÂ¿ªÊ¼½ÓÊÕ
+            /* RELAY â€” ç»§ç”µå™¨æ§åˆ¶
+             *   RELAY           â†’ æŸ¥è¯¢å…¨éƒ¨ç»§ç”µå™¨çŠ¶æ€
+             *   RELAY 0 ON      â†’ æ‰“å¼€è’¸å‘é£æ‰‡(K1)
+             *   RELAY 3 OFF     â†’ å…³é—­æ»‘æ²¹çƒ­ä¸(K2)
+             *   RELAY ALL OFF   â†’ å…¨éƒ¨å…³é—­
+             *   RELAY ALL ON    â†’ å…¨éƒ¨æ‰“å¼€
+             *   ç¼–å·: 0=è’¸å‘é£æ‰‡ 1=å†·å‡é£æ‰‡ 2=åŒ–éœœçƒ­ä¸ 3=æ»‘æ²¹çƒ­ä¸ 4=å‡éœ²çƒ­ä¸ 5=ç…§æ˜
+             */
+            else if(strstr((char *)rx_buffer, "RELAY") != NULL) {
+                char rmsg[128];
+                char *p = strstr((char *)rx_buffer, "RELAY") + 5;
+
+                /* è·³è¿‡ç©ºæ ¼ */
+                while (*p == ' ') p++;
+
+                if (strncmp(p, "ALL", 3) == 0) {
+                    p += 3;
+                    while (*p == ' ') p++;
+                    if (strncmp(p, "ON", 2) == 0) {
+                        for (int i = 0; i < RELAY_COUNT; i++) BSP_Relay_On((Relay_ID)i);
+                        BSP_RS485_SendString("ALL relays ON\r\n");
+                    } else {
+                        BSP_Relay_AllOff();
+                        BSP_RS485_SendString("ALL relays OFF\r\n");
+                    }
+                } else if (*p >= '0' && *p <= '5') {
+                    int id = *p - '0';
+                    p++;
+                    while (*p == ' ') p++;
+                    if (strncmp(p, "ON", 2) == 0) {
+                        BSP_Relay_On((Relay_ID)id);
+                        sprintf(rmsg, "%s(K%d) â†’ ON\r\n", BSP_Relay_Name((Relay_ID)id), id);
+                        BSP_RS485_SendString(rmsg);
+                    } else if (strncmp(p, "OFF", 3) == 0) {
+                        BSP_Relay_Off((Relay_ID)id);
+                        sprintf(rmsg, "%s(K%d) â†’ OFF\r\n", BSP_Relay_Name((Relay_ID)id), id);
+                        BSP_RS485_SendString(rmsg);
+                    } else {
+                        /* æŸ¥è¯¢å•ä¸ª */
+                        sprintf(rmsg, "%s(K%d): %s\r\n", BSP_Relay_Name((Relay_ID)id), id,
+                                BSP_Relay_GetState((Relay_ID)id) ? "ON" : "OFF");
+                        BSP_RS485_SendString(rmsg);
+                    }
+                } else {
+                    /* æ— å‚æ•° â€” æŸ¥è¯¢å…¨éƒ¨çŠ¶æ€ */
+                    BSP_RS485_SendString("\r\n=== RELAY STATUS ===\r\n");
+                    for (int i = 0; i < RELAY_COUNT; i++) {
+                        sprintf(rmsg, "  [%d] %-8s : %s\r\n", i, BSP_Relay_Name((Relay_ID)i),
+                                BSP_Relay_GetState((Relay_ID)i) ? "ON" : "OFF");
+                        BSP_RS485_SendString(rmsg);
+                    }
+                    BSP_RS485_SendString("====================\r\n");
+                }
+            }
+
+            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï£ï¿½ï¿½ï¿½Õ»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â¿ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½
             rx_index = 0;
             memset(rx_buffer, 0, sizeof(rx_buffer));
             rx_complete = 0;
             // ==========================================
-            // ÇåÀí¿ÉÄÜ²ĞÁôµÄ´®¿ÚÓ²¼ş´íÎó±êÖ¾Î»
-            // ·ÀÖ¹ RS485 ÊÕ·¢ÇĞ»»Ë²¼äÃ«´Ìµ¼ÖÂĞ¾Æ¬µÄÓ²¼ş±£»¤¹ÒÆğ
+            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü²ï¿½ï¿½ï¿½ï¿½Ä´ï¿½ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¾Î»
+            // ï¿½ï¿½Ö¹ RS485 ï¿½Õ·ï¿½ï¿½Ğ»ï¿½Ë²ï¿½ï¿½Ã«ï¿½Ìµï¿½ï¿½ï¿½Ğ¾Æ¬ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             // ==========================================
-            __HAL_UART_CLEAR_OREFLAG(&huart4); // Çå³ıÒç³ö´íÎó (Overrun)
-            __HAL_UART_CLEAR_NEFLAG(&huart4);  // Çå³ıÔëÉù´íÎó (Noise)
-            __HAL_UART_CLEAR_FEFLAG(&huart4);  // Çå³ıÖ¡´íÎó (Framing)
+            __HAL_UART_CLEAR_OREFLAG(&huart4); // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (Overrun)
+            __HAL_UART_CLEAR_NEFLAG(&huart4);  // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (Noise)
+            __HAL_UART_CLEAR_FEFLAG(&huart4);  // ï¿½ï¿½ï¿½Ö¡ï¿½ï¿½ï¿½ï¿½ (Framing)
             
-            huart4.ErrorCode = HAL_UART_ERROR_NONE; // Ç¿ÖÆÆ­¹ı HAL ¿â£¬ËµÃ»ÓĞ´íÎó
-            huart4.RxState = HAL_UART_STATE_READY;  // Ç¿ĞĞ°Ñ×´Ì¬»Ö¸´µ½"×¼±¸½ÓÊÕ"×´Ì¬
+            huart4.ErrorCode = HAL_UART_ERROR_NONE; // Ç¿ï¿½ï¿½Æ­ï¿½ï¿½ HAL ï¿½â£¬ËµÃ»ï¿½Ğ´ï¿½ï¿½ï¿½
+            huart4.RxState = HAL_UART_STATE_READY;  // Ç¿ï¿½Ğ°ï¿½×´Ì¬ï¿½Ö¸ï¿½ï¿½ï¿½"×¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½"×´Ì¬
             HAL_UART_Receive_IT(&huart4, &rx_byte, 1); 
         }
         
-        // Ã»ÊÂ¸É¾ÍË¯ 50ms£¬²»Õ¼ CPU
+        /* KEY è°ƒè¯•æ¨¡å¼: æŒç»­æ‰«æä¸¤ä¸ªé¢æ¿çš„æŒ‰é”®å¹¶æ‰“å° */
+        if (s_key_debug) {
+            char kmsg[64];
+            uint8_t k0 = HTC2K_ReadKeys();
+            uint8_t k1 = HTC2K_ReadKeys1();
+            if (k0 != 0x00 && k0 != 0xFF) {
+                sprintf(kmsg, "[PANEL0] key=0x%02X\r\n", k0);
+                BSP_RS485_SendString(kmsg);
+                osDelay(200);
+            }
+            if (k1 != 0x00 && k1 != 0xFF) {
+                sprintf(kmsg, "[PANEL1] key=0x%02X\r\n", k1);
+                BSP_RS485_SendString(kmsg);
+                osDelay(200);
+            }
+        }
+
+        /* ============================================
+         * UART æ¥æ”¶çŠ¶æ€å®ˆæŠ¤: é˜²æ­¢ Overrun/Noise/Frame é”™è¯¯
+         * å¯¼è‡´ HAL æ¥æ”¶ä¸­æ–­æ°¸ä¹…åœæ­¢
+         * ============================================ */
+        if (huart4.RxState != HAL_UART_STATE_BUSY_RX) {
+            __HAL_UART_CLEAR_OREFLAG(&huart4);
+            __HAL_UART_CLEAR_NEFLAG(&huart4);
+            __HAL_UART_CLEAR_FEFLAG(&huart4);
+            huart4.ErrorCode = HAL_UART_ERROR_NONE;
+            huart4.RxState   = HAL_UART_STATE_READY;
+            HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
+        }
+
         osDelay(50);
     }
 }

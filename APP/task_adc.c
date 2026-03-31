@@ -80,6 +80,40 @@ int16_t adc_to_temperature_50k(uint16_t adc_value) {
 }
 
 /* ==========================================================
+ * CO2 饱和压力 → 饱和温度 (多项式拟合)
+ *
+ * 数据来源: CO2物性参数表 (新建 Microsoft Excel 工作表(1).xlsx)
+ * 有效范围: 0.58 ~ 7.27 MPa  (-50℃ ~ +31℃)
+ *
+ * 拟合公式 (5阶多项式, 输入MPa, 输出℃):
+ *   T = -72.00065 + 45.68597·P - 13.8827·P² + 2.86921·P³
+ *       - 0.31175·P⁴ + 0.01346·P⁵
+ *
+ * 最大误差 ≤ 0.5℃, 满足制冷控制精度要求.
+ * 采用 Horner 法计算, 减少乘法次数, 提高数值稳定性.
+ * ========================================================== */
+static float co2_pressure_to_sat_temp(float pressure_bar)
+{
+    /* bar → MPa */
+    float p = pressure_bar * 0.1f;
+
+    /* 范围保护 */
+    if (p < 0.58f) p = 0.58f;
+    if (p > 7.28f) p = 7.28f;
+
+    /* Horner 法: T = ((((0.01346·P - 0.31175)·P + 2.86921)·P - 13.8827)·P + 45.68597)·P - 72.00065 */
+    float t = 0.01346f;
+    t = t * p + (-0.31175f);
+    t = t * p + 2.86921f;
+    t = t * p + (-13.8827f);
+    t = t * p + 45.68597f;
+    t = t * p + (-72.00065f);
+
+    return t;
+}
+
+
+/* ==========================================================
  * 压力传感器 ADC → 压力值 (bar)
  *
  * 硬件电路 (原理图 V13 Page2 "ImportPre"):
@@ -159,7 +193,16 @@ void Task_ADC_Process(void const *argument) {
         float pres_h = adc_to_pressure(adc_buffer[6],
                                        PRES_HIGH_V_FULL, PRES_HIGH_MAX_BAR); /* 高压 PC4 */
 
-        /* 3. 更新全局变量 */
+        /* 3. CO2 饱和温度计算 (压力→温度, 多项式拟合) */
+        float sat_temp_low  = co2_pressure_to_sat_temp(pres_l);  /* 低压饱和温度 (蒸发温度) */
+        float sat_temp_high = co2_pressure_to_sat_temp(pres_h);  /* 高压饱和温度 (冷凝温度) */
+
+        /* 4. 过热度 = 吸气实测温度 - 低压饱和温度 */
+        float suction_temp_actual = t_inui5 / 10.0f;  /* INUI5 50K NTC 作为吸气温度传感器 */
+        float superheat = suction_temp_actual - sat_temp_low;
+        if (superheat < 0.0f) superheat = 0.0f;
+
+        /* 5. 更新全局变量 */
         g_temp_inui4_10k = t_inui4 / 10.0f;
         g_temp_inui5_50k = t_inui5 / 10.0f;
         g_temp_inui0_10k = t_inui0 / 10.0f;
@@ -168,18 +211,31 @@ void Task_ADC_Process(void const *argument) {
         g_pres_low  = pres_l;
         g_pres_high = pres_h;
 
-        /* 4. 写入系统状态 (互斥保护) */
+        /* 6. 写入系统状态 (互斥保护) */
         SysState_Lock();
-        /* 温度 (保持原有映射, 等确认用途后再调整) */
-        SysState_GetRawPtr()->VAR_CABINET_TEMP   = g_temp_inui4_10k;
+        /* 温度: 柜温由SHT30任务写入, 这里不覆盖 VAR_CABINET_TEMP */
         SysState_GetRawPtr()->VAR_EVAP_TEMP      = g_temp_inui4_10k;
         SysState_GetRawPtr()->VAR_EXHAUST_TEMP   = g_temp_inui5_50k;
         /* 压力 */
         SysState_GetRawPtr()->VAR_SUCTION_PRES   = g_pres_low;   /* 低压→吸气压力 */
         SysState_GetRawPtr()->VAR_DISCHARGE_PRES = g_pres_high;  /* 高压→排气压力 */
+        /* CO2 饱和温度 (由压力通过多项式拟合转换) */
+        SysState_GetRawPtr()->VAR_SUCTION_TEMP   = sat_temp_low;  /* 低压饱和温度→吸气温度 */
+        SysState_GetRawPtr()->VAR_COND_TEMP      = sat_temp_high; /* 高压饱和温度→冷凝温度 */
+        SysState_GetRawPtr()->VAR_SUPERHEAT       = superheat;    /* 过热度 */
         SysState_Unlock();
 
-        /* 5. 每 100ms 刷新一次 */
+        /* 7. 每 100ms 刷新一次 */
         vTaskDelay(pdMS_TO_TICKS(100));
     }
+}
+
+/* ==========================================================
+ * 公共接口: CO2 饱和压力→饱和温度 (供外部模块调用)
+ * 输入: pressure_bar (单位 bar)
+ * 输出: 饱和温度 (单位 ℃)
+ * ========================================================== */
+float CO2_PressureToSatTemp(float pressure_bar)
+{
+    return co2_pressure_to_sat_temp(pressure_bar);
 }
