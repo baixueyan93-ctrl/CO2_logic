@@ -168,33 +168,37 @@ void MX_FREERTOS_Init(void) {
   Task_SHT30Handle = osThreadCreate(osThread(Task_SHT30), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* �������ͷ��������� (��ͨ���ȼ�, 256��ջ) */
+  /* ========== 以下6个逻辑任务暂时注释, 硬件测试阶段只跑传感器+显示 ========== */
+#if 0
+  /* 电子膨胀阀控制任务 (普通优先级, 256栈) */
   osThreadDef(Task_EXV, StartTask_EXV, osPriorityNormal, 0, 256);
   Task_EXVHandle = osThreadCreate(osThread(Task_EXV), NULL);
 
-  /* �¶ȿ����������� (�߼�ͼ1, ��ͨ���ȼ�, 512ջ) */
+  /* 温度控制主任务 (逻辑图1, 普通优先级, 512栈) */
   osThreadDef(Task_TempCtrl, StartTask_TempCtrl, osPriorityNormal, 0, 512);
   Task_TempCtrlHandle = osThreadCreate(osThread(Task_TempCtrl), NULL);
 
-  /* ��˪�������� (�߼�ͼ2, ��ͨ���ȼ�, 512ջ) */
+  /* 除霜控制任务 (逻辑图2, 普通优先级, 512栈) */
   osThreadDef(Task_Defrost, StartTask_Defrost, osPriorityNormal, 0, 512);
   Task_DefrostHandle = osThreadCreate(osThread(Task_Defrost), NULL);
 
-  /* ����������(1��6)������ (�߼�ͼ3, ��ͨ���ȼ�, 256ջ) */
+  /* 蒸发风机(1至6)任务 (逻辑图3, 普通优先级, 256栈) */
   osThreadDef(Task_EvapFan, StartTask_EvapFan, osPriorityNormal, 0, 256);
   Task_EvapFanHandle = osThreadCreate(osThread(Task_EvapFan), NULL);
 
-  /* ��Ƶ����(PID)�����ͷ��������� (�߼�ͼ4, ��ͨ���ȼ�, 512ջ) */
+  /* 变频控制(PID)+电子膨胀阀任务 (逻辑图4, 普通优先级, 512栈) */
   osThreadDef(Task_FreqExv, StartTask_FreqExv, osPriorityNormal, 0, 512);
   Task_FreqExvHandle = osThreadCreate(osThread(Task_FreqExv), NULL);
 
-  /* ��ʱ�жϷ��������(�߼�ͼ5, ����ͨ���ȼ�, 256ջ) */
+  /* 定时中断服务任务 (逻辑图5, 高于普通优先级, 256栈) */
   osThreadDef(Task_TimerSvc, StartTask_TimerSvc, osPriorityAboveNormal, 0, 256);
   Task_TimerSvcHandle = osThreadCreate(osThread(Task_TimerSvc), NULL);
 
-  /* ������(3̨)������ (�߼�ͼ6, ��ͨ���ȼ�, 256ջ) */
+  /* 冷凝风机(3台)任务 (逻辑图6, 普通优先级, 256栈) */
   osThreadDef(Task_CondFan, StartTask_CondFan, osPriorityNormal, 0, 256);
   Task_CondFanHandle = osThreadCreate(osThread(Task_CondFan), NULL);
+#endif
+  /* ========== 逻辑任务注释结束 ========== */
 
   /* USER CODE END RTOS_THREADS */
 
