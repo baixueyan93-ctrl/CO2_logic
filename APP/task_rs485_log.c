@@ -134,6 +134,11 @@ void Task_RS485Log_Process(void const *argument) {
             current_data.VAR_SUPERHEAT);
     BSP_RS485_SendString(msg);
 
+    /* 报警标志和图标调试 */
+    sprintf(msg, "ALARM: 0x%08lX  ICON0:0x%02X  ICON1:0x%02X\r\n",
+            (unsigned long)g_AlarmFlags, g_IconSet.byte, g_IconSet1.byte);
+    BSP_RS485_SendString(msg);
+
     BSP_RS485_SendString("=======================\r\n");
 }
             /* KEY — 开启/关闭 按键调试模式 */
