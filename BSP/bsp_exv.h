@@ -28,8 +28,8 @@
 #define EXV0_PM0D_PIN    GPIO_PIN_8
 
 /* --- 步进参数 --- */
-#define EXV_TOTAL_STEPS      1000   /* VKV 全行程步数              */
-#define EXV_INIT_CLOSE_STEPS 1050   /* 初始化关阀步数(多50步确保全关) */
+#define EXV_TOTAL_STEPS      500    /* VKV 全行程步数              */
+#define EXV_INIT_CLOSE_STEPS 550    /* 初始化关阀步数(多50步确保全关) */
 #define EXV_STEP_DELAY_MS    20     /* ÿ����ʱ (ms), Լ50 PPS     */
 
 /* --- ���� --- */
