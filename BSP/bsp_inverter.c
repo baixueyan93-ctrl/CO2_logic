@@ -106,4 +106,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
         HAL_UART_Receive_IT(&huart1, InvRxBuf, INV_FRAME_LEN);
     }
+    else if (huart->Instance == UART4)
+    {
+        /* RS485/Modbus 接收回调 (原 task_rs485_log.c) */
+        extern uint8_t rx_buffer[128];
+        extern uint16_t rx_index;
+        extern volatile uint8_t rx_complete;
+        extern uint8_t rx_byte;
+        extern UART_HandleTypeDef huart4;
+
+        rx_buffer[rx_index++] = rx_byte;
+
+        if (rx_byte == '\n' || rx_byte == '\r' || rx_index >= 127) {
+            rx_buffer[rx_index] = '\0';
+            rx_complete = 1;
+        } else {
+            HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
+        }
+    }
 }
