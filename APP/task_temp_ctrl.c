@@ -164,13 +164,20 @@ void TempCtrl_ShutdownAlarm(void)
     float vdc = sensor.VAR_VDC_VOLTAGE;
 
     /* ---- 第2步: 判断 VDC ≥ VDCmin ---- */
-    if (vdc >= SET_VDC_MIN) {
-        /* 电压正常 → 清除EDC告警 */
-        g_AlarmFlags &= ~ERR_VDC_LOW;
+    /* 注意: VAR_VDC_VOLTAGE 暂未被 task_adc 采集, 跳过此检测
+     * TODO: task_adc 增加 PB1/VSININ 电压采集后启用
+     */
+    if (vdc > 0.1f) {
+        /* 有有效电压读数时才判断 */
+        if (vdc >= SET_VDC_MIN) {
+            g_AlarmFlags &= ~ERR_VDC_LOW;
+        } else {
+            g_AlarmFlags |= ERR_VDC_LOW;
+            need_shutdown = true;
+        }
     } else {
-        /* 电压偏低 → 置位EDC, 需要关机 */
-        g_AlarmFlags |= ERR_VDC_LOW;
-        need_shutdown = true;
+        /* 无采集数据(0V), 不触发告警 */
+        g_AlarmFlags &= ~ERR_VDC_LOW;
     }
 
     /* ---- 第3步: 判断 VAC 错/断相 ---- */
@@ -724,7 +731,8 @@ void TempCtrl_OilHeatControl(void)
     SysVarData_t sensor;
     SysState_GetSensor(&sensor);
 
-    if (sensor.VAR_AMBIENT_TEMP <= SET_OIL_HEAT_TEMP) {
+    /* VAR_AMBIENT_TEMP 暂无传感器, 用 SHT30 柜温代替 */
+    if (sensor.VAR_SHT30_TEMP <= SET_OIL_HEAT_TEMP) {
         /* 环境温度 ≤ 10°C → 油壳加热开 (防止冷凝液稀释润滑油) */
         OilHeater_On();
     } else {
@@ -757,6 +765,7 @@ void Task_TempCtrl_Process(void const *argument)
     /* 系统初始化: 置位首次运行标志, 启动通电延迟C3计时
      * (对应流程图"系统初始化"步骤)
      */
+    xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);   /* 上电默认开机 */
     xEventGroupSetBits(SysEventGroup, ST_FIRST_RUN);
     g_TimerData.TMR_C3_CNT = 0;
     xEventGroupClearBits(SysTimerEventGroup, ST_TMR_C3_DONE);

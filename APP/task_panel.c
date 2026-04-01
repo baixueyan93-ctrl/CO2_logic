@@ -39,7 +39,7 @@ void Task_Panel_Process(void const *argument)
     HTC2K_Init1();  /* PANEL1 (PB4/PB5) */
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    g_set_temp = g_set_temp;
+    /* g_set_temp 已在全局初始化为 SET_TEMP_TS (-10℃) */
 
     for (;;) {
         /* 读取系统状态 */
@@ -96,7 +96,7 @@ void Task_Panel_Process(void const *argument)
             if (key0 == KEY_CODE_RST) {
                 /* 复位: 退出设置模式, 恢复默认温度 */
                 g_panel_mode = 0;
-                g_set_temp = g_set_temp;
+                g_set_temp = SET_TEMP_TS;  /* 恢复默认温度 */
             }
             else if (key0 == KEY_CODE_SET) {
                 /* 切换设置模式 */
