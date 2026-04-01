@@ -29,7 +29,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "bsp_inverter.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -98,7 +98,8 @@ int main(void)
   MX_RTC_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-
+  BSP_Inverter_Init();
+  HAL_UART_Receive_IT(&huart1, InvRxBuf, INV_FRAME_LEN);
   /* USER CODE END 2 */
 
   /* Call init function for freertos objects (in freertos.c) */
