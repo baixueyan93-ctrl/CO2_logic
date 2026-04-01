@@ -6,6 +6,7 @@
 #include "sys_state.h"
 #include "sys_config.h"
 #include "bsp_relay.h"
+#include "bsp_inverter.h"
 #include <stdbool.h>
 
 /* ===========================================================================
@@ -36,31 +37,31 @@ static void OilHeater_Off(void)
     xEventGroupClearBits(SysEventGroup, ST_OIL_HEAT_ON);
 }
 
-/* --- 压缩机启动 (通过变频器, 接口待确认) --- */
+/* --- 压缩机启动 (通过变频器, 初始频率80Hz) --- */
 static void Compressor_Start(void)
 {
-    /* TODO: 发送变频器启动指令, 设置初始频率 F=125Hz
-     * 可能通过 RS485/MODBUS 或 GPIO 控制
-     */
+    BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
     xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
 }
 
 /* --- 压缩机停止 --- */
 static void Compressor_Stop(void)
 {
-    /* TODO: 发送变频器停止指令 */
+    BSP_Inverter_Send(0x00, 0);
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
 }
 
 /* --- 设置压缩机频率 --- */
 static void Compressor_SetFreq(float freq_hz)
 {
-    /* TODO: 通过变频器通信设置频率
-     * freq_hz: 目标频率 (Hz)
-     */
+    if (freq_hz > SET_FREQ_MAX) freq_hz = SET_FREQ_MAX;
+    if (freq_hz < SET_FREQ_MIN) freq_hz = SET_FREQ_MIN;
+
     SysState_Lock();
     SysState_GetRawPtr()->VAR_COMP_FREQ = freq_hz;
     SysState_Unlock();
+
+    BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
 }
 
 /* --- 读取VAC相序状态 (接口待确认) ---

@@ -7,6 +7,7 @@
 #include "sys_config.h"
 #include "bsp_relay.h"
 #include "bsp_exv.h"
+#include "bsp_inverter.h"
 #include <stdbool.h>
 
 /* ===========================================================================
@@ -51,9 +52,7 @@ static void DefrostHeater_Off(void)
  */
 static void Defrost_StopCompressor(void)
 {
-    /* TODO: 停止压缩机 (与温度控制任务协调)
-     * 除霜期间通过 ST_DEFROST_ACTIVE 标志通知温度控制任务暂停
-     */
+    BSP_Inverter_Send(0x00, 0);
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
 }
 
@@ -62,9 +61,10 @@ static void Defrost_StopCompressor(void)
  */
 static void Defrost_StartCompressor(float freq_hz)
 {
-    /* TODO: 通过变频器通信启动压缩机并设置频率
-     * 除霜模式下的压缩机运行方式可能与制冷模式不同
-     */
+    if (freq_hz > SET_FREQ_MAX) freq_hz = SET_FREQ_MAX;
+    if (freq_hz < SET_FREQ_MIN) freq_hz = SET_FREQ_MIN;
+
+    BSP_Inverter_Send(0x01, (uint16_t)freq_hz);
     xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
     SysState_Lock();
     SysState_GetRawPtr()->VAR_COMP_FREQ = freq_hz;
@@ -513,21 +513,21 @@ void Defrost_HeatSubroutine(void)
      * ================================================================ */
     case HEAT_COMP_RAMP: {
         /* 每秒升频, 直到达到目标频率 */
-        const float RAMP_STEP = 10.0f;     /* 每秒升10Hz (待确认) */
-        const float RAMP_TARGET = SET_FREQ_INIT;  /* 目标: 125Hz */
+        const float RAMP_STEP = 10.0f;     /* 每秒升10Hz */
+        const float RAMP_TARGET = SET_FREQ_MAX;   /* 目标: 320Hz */
 
         s_comp_ramp_freq += RAMP_STEP;
         if (s_comp_ramp_freq >= RAMP_TARGET) {
             s_comp_ramp_freq = RAMP_TARGET;
-            s_heat_state = HEAT_RUNNING;   /* 升频完成, 进入运行状态 */
+            s_heat_state = HEAT_RUNNING;
         }
 
-        /* 更新压缩机频率 */
+        /* 更新压缩机频率并发送给变频板 */
         SysState_Lock();
         SysState_GetRawPtr()->VAR_COMP_FREQ = s_comp_ramp_freq;
         SysState_Unlock();
 
-        /* TODO: 通过变频器通信实际设置频率 */
+        BSP_Inverter_Send(0x02, (uint16_t)s_comp_ramp_freq);
         break;
     }
 

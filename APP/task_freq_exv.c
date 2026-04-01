@@ -6,6 +6,7 @@
 #include "sys_state.h"
 #include "sys_config.h"
 #include "bsp_exv.h"
+#include "bsp_inverter.h"
 #include <stdbool.h>
 #include <math.h>
 
@@ -36,7 +37,6 @@
 
 /* --- PID调整模块内部参数 --- */
 #define PID_FREQ_STEP_MAX       20.0f   /* 最大频率调整步长 (Hz/次), 待调参 */
-#define PID_FREQ_MAX            125.0f  /* 压缩机最大频率 (Hz) = SET_FREQ_INIT */
 
 
 /* ===================================================================
@@ -56,20 +56,21 @@ static bool  s_prev_dt_valid = false;   /* 首次运行时无上一次数据 */
 static void PID_SetFreq(float freq_hz)
 {
     /* 上限保护 */
-    if (freq_hz > PID_FREQ_MAX) {
-        freq_hz = PID_FREQ_MAX;
+    if (freq_hz > SET_FREQ_MAX) {
+        freq_hz = SET_FREQ_MAX;
     }
     /* 下限保护 */
     if (freq_hz < SET_FREQ_MIN) {
         freq_hz = SET_FREQ_MIN;
     }
 
-    /* 写入全局传感器数据 (变频器实际设置由通信任务读取此值) */
+    /* 写入全局状态 */
     SysState_Lock();
     SysState_GetRawPtr()->VAR_COMP_FREQ = freq_hz;
     SysState_Unlock();
 
-    /* TODO: 通过变频器通信接口实际设置频率 */
+    /* 发送调频指令给变频板 */
+    BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
 }
 
 /* --- 设置膨胀阀开度 (含上下限保护) --- */
@@ -98,7 +99,7 @@ static void EXV_SetOpening(float kp)
 static void PID_StopCompressor(void)
 {
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
-    /* TODO: 发送变频器停止指令 */
+    BSP_Inverter_Send(0x00, 0);
 }
 
 
@@ -177,7 +178,7 @@ void FreqExv_PidAdjust(void)
      * ================================================================ */
     if (delta_t >= SET_DT_MAX) {
         /* 是 → 最快速升频 */
-        new_freq = PID_FREQ_MAX;
+        new_freq = SET_FREQ_MAX;
         PID_SetFreq(new_freq);
         return;
     }

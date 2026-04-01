@@ -4,6 +4,7 @@
 #include "event_groups.h"
 #include "bsp_htc_2k.h"
 #include "bsp_relay.h"
+#include "bsp_inverter.h"
 #include "sys_state.h"
 #include "sys_config.h"
 #include <stdbool.h>
@@ -140,7 +141,9 @@ void Task_Panel_Process(void const *argument)
                 g_system_on = !g_system_on;
                 if (g_system_on) {
                     xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
+                    BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);  /* 开机, 初始频率80Hz */
                 } else {
+                    BSP_Inverter_Send(0x00, 0);                         /* 关机 */
                     xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
                     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
                 }
