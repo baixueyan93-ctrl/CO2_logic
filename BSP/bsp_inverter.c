@@ -36,7 +36,7 @@ void BSP_Inverter_Init(void)
     huart1.Init.OverSampling = UART_OVERSAMPLING_16;
     HAL_UART_Init(&huart1);
 
-    HAL_NVIC_SetPriority(USART1_IRQn, 6, 0);
+    HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);   /* FreeRTOS下最高可用优先级 */
     HAL_NVIC_EnableIRQ(USART1_IRQn);
 
     HAL_UART_Receive_IT(&huart1, InvRxBuf, INV_FRAME_LEN);
