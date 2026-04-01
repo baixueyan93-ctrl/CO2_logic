@@ -14,6 +14,8 @@
  *   - 8按键: Reset/Set/Up/Down/Defrost/Light/Inspect/Power
  * =========================================================================== */
 
+extern float g_set_temp;   /* 面板可调的设定温度 (运行时Ts) */
+
 void Task_Panel_Process(void const *argument);
 
 #endif

@@ -7,6 +7,7 @@
 #include "sys_config.h"
 #include "bsp_relay.h"
 #include "bsp_inverter.h"
+#include "task_panel.h"
 #include <stdbool.h>
 
 /* ===========================================================================
@@ -386,7 +387,7 @@ void TempCtrl_AlarmProcess(void)
      *    SET_SUCTION_TMIN = 15.0f (温差阈值)
      *    TLS 近似取 SET_TEMP_TS (设定温度)
      * ================================================================ */
-    float suction_diff = SET_TEMP_TS - sensor.VAR_SUCTION_TEMP;
+    float suction_diff = g_set_temp - sensor.VAR_SUCTION_TEMP;
 
     if (suction_diff <= SET_SUCTION_TMIN) {
         /* Y → WTL 置位: 吸温与设定值差距过小, 吸气过热度不足 */
@@ -619,7 +620,7 @@ void TempCtrl_MainLogic(void)
         }
 
         /* 是: 停机保护已过 → 柜温 Tc ≥ Ts+C1? */
-        if (tc >= SET_TEMP_TS + SET_TEMP_HYST_C1) {
+        if (tc >= g_set_temp + SET_TEMP_HYST_C1) {
             /* Y → 开启压缩机
              *   调用子逻辑2(压缩机开机逻辑):
              *   设置F=125Hz, 启动热车计时C20
@@ -652,7 +653,7 @@ void TempCtrl_MainLogic(void)
         }
 
         /* 是: 最短运行时间已过 → 柜温 Tc ≥ Ts+C1? */
-        if (tc >= SET_TEMP_TS + SET_TEMP_HYST_C1) {
+        if (tc >= g_set_temp + SET_TEMP_HYST_C1) {
             /* Y → 温度还高, 继续运行, PID调整频率
              *
              *   PID调整需要满足两个前置条件:

@@ -7,6 +7,7 @@
 #include "sys_config.h"
 #include "bsp_exv.h"
 #include "bsp_inverter.h"
+#include "task_panel.h"
 #include <stdbool.h>
 #include <math.h>
 
@@ -160,7 +161,7 @@ void FreqExv_PidAdjust(void)
      *  △T < 0: 柜温低于设定, 需要减弱制冷 (降频)
      *  △T ≈ 0: 已达目标, 维持
      * ================================================================ */
-    float delta_t = sensor.VAR_CABINET_TEMP - SET_TEMP_TS;
+    float delta_t = sensor.VAR_CABINET_TEMP - g_set_temp;
     float current_freq = sensor.VAR_COMP_FREQ;
     float new_freq = current_freq;
 
