@@ -26,12 +26,10 @@ void Defrost_MainProcess(void);        /* 除霜主程序   */
 void Defrost_HeatSubroutine(void);     /* 加热子程序   */
 
 /* ===========================================================================
- * 硬件接口定义 (待确认后填入实际引脚)
+ * 硬件接口说明
  *
- * 除霜加热器:
- *   TODO: 确认除霜加热器继电器GPIO引脚
+ * 除霜加热器: 通过 BSP_Relay_On/Off(RELAY_DEF_HEATER) 控制 (K7, PC7)
+ * 膨胀阀:     通过 BSP_EXV_SetPosition() 步进到除霜全开位置
  * =========================================================================== */
-#define DEF_HEATER_GPIO_PORT    GPIOD           /* 待确认 */
-#define DEF_HEATER_GPIO_PIN     GPIO_PIN_1      /* 待确认 */
 
 #endif /* TASK_DEFROST_H */

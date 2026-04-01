@@ -77,7 +77,14 @@ void Task_Panel_Process(void const *argument)
                 if (g_set_temp < -30.0f) g_set_temp = -30.0f;
             }
             else if (key == KEY_CODE_DEFROST) {
-                if (sys_bits & ST_COMP_RUNNING) xEventGroupSetBits(SysEventGroup, ST_DEFROST_ACTIVE);
+                if (sys_bits & ST_DEFROST_ACTIVE) {
+                    /* 正在除霜 → 再按一次手动取消: 清除所有除霜标志 */
+                    xEventGroupClearBits(SysEventGroup,
+                        ST_DEFROST_ACTIVE | ST_DEF_HEATING | ST_DEF_DRIPPING);
+                } else {
+                    /* 未在除霜 → 手动触发除霜 (仅置总标志, 由defrost任务启动序列) */
+                    xEventGroupSetBits(SysEventGroup, ST_DEFROST_ACTIVE);
+                }
             }
             else if (key == KEY_CODE_LIGHT) {
                 g_light_on = !g_light_on;

@@ -5,6 +5,8 @@
 #include "main.h"
 #include "sys_state.h"
 #include "sys_config.h"
+#include "bsp_relay.h"
+#include "bsp_exv.h"
 #include <stdbool.h>
 
 /* ===========================================================================
@@ -33,16 +35,15 @@
  *  内部辅助函数 / 硬件操作桩
  * =================================================================== */
 
-/* --- 除霜加热器控制 --- */
+/* --- 除霜加热器控制 (通过 K7 继电器, PC7) --- */
 static void DefrostHeater_On(void)
 {
-    /* TODO: 确认实际GPIO引脚后填入 */
-    HAL_GPIO_WritePin(DEF_HEATER_GPIO_PORT, DEF_HEATER_GPIO_PIN, GPIO_PIN_SET);
+    BSP_Relay_On(RELAY_DEF_HEATER);
 }
 
 static void DefrostHeater_Off(void)
 {
-    HAL_GPIO_WritePin(DEF_HEATER_GPIO_PORT, DEF_HEATER_GPIO_PIN, GPIO_PIN_RESET);
+    BSP_Relay_Off(RELAY_DEF_HEATER);
 }
 
 /* --- 压缩机停止 (除霜时需要停止制冷) ---
@@ -71,11 +72,12 @@ static void Defrost_StartCompressor(float freq_hz)
 }
 
 /* --- 膨胀阀步进到除霜位置 --- */
+#define DEF_EXV_POSITION   500   /* 除霜时全开 (让高温制冷剂通过蒸发器) */
+
 static void Defrost_ValveStep(void)
 {
-    /* TODO: 调用 bsp_exv 接口, 将膨胀阀步进到除霜位置
-     * 除霜时膨胀阀需要开到特定开度, 让高温制冷剂通过蒸发器
-     */
+    BSP_EXV_SetPosition(DEF_EXV_POSITION, EXV_STEP_DELAY_MS);
+    BSP_EXV_DeEnergize();
 }
 
 /* ===================================================================
@@ -98,6 +100,7 @@ typedef enum {
 static DefrostHeatState_t s_heat_state = HEAT_IDLE;
 static uint32_t s_heat_delay_cnt = 0;     /* 加热子程序内部延时计数器 */
 static float    s_comp_ramp_freq = 0.0f;  /* 压缩机升频当前值       */
+static bool     s_was_defrosting = false; /* 上一周期是否在除霜 (检测手动取消) */
 
 /* --- 加热子程序状态机复位 --- */
 static void Defrost_HeatReset(void)
@@ -201,14 +204,30 @@ void Defrost_MainProcess(void)
     EventBits_t sys_bits = xEventGroupGetBits(SysEventGroup);
     EventBits_t tmr_bits = xEventGroupGetBits(SysTimerEventGroup);
 
-    /* ---- 读取设置值、测量值和定时标记 ----
-     * 设置值: SET_DEF_INTERVAL, SET_DEF_HEAT_MAX, SET_DEF_HEAT_TLIMIT,
-     *         SET_DRIP_TIME 等 (编译期常量)
-     * 测量值: VAR_EVAP_TEMP (蒸发器温度, 判断加热是否达标)
-     * 定时标记: ST_TMR_DEF_INTV_DONE, ST_TMR_DEF_DUR_DONE, ST_TMR_DEF_DRIP_DONE
-     */
+    /* ---- 读取设置值、测量值和定时标记 ---- */
     SysVarData_t sensor;
     SysState_GetSensor(&sensor);
+
+    /* ================================================================
+     *  手动取消检测: 上周期在除霜, 本周期 ST_DEFROST_ACTIVE 被外部清除
+     *  面板按键再按一次除霜键时清除所有除霜标志, 这里负责安全收尾
+     * ================================================================ */
+    if (s_was_defrosting && !(sys_bits & ST_DEFROST_ACTIVE)) {
+        /* 关闭加热器 + 停压缩机 + 复位状态机 */
+        DefrostHeater_Off();
+        Defrost_StopCompressor();
+        Defrost_HeatReset();
+
+        /* 复位计时器, 重新开始除霜间隔计时 */
+        g_TimerData.TMR_DEF_INTV_CNT = 0;
+        xEventGroupClearBits(SysTimerEventGroup, ST_TMR_DEF_INTV_DONE);
+        g_TimerData.TMR_DEF_DUR_CNT = 0;
+        g_TimerData.TMR_DRIP_CNT = 0;
+
+        s_was_defrosting = false;
+        return;
+    }
+    s_was_defrosting = !!(sys_bits & ST_DEFROST_ACTIVE);
 
     /* ================================================================
      *  正在除霜?
