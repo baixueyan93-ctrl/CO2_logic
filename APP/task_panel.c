@@ -11,95 +11,141 @@
 /* ===========================================================================
  * 面板操作全局变量
  * =========================================================================== */
-float   g_set_temp  = -20.0f;  /* 用户设定温度 */
-uint8_t g_panel_mode = 0;      /* 0: 正常监控, 1: 温度设置模式 */
-bool    g_light_on   = false;  /* 照明灯状态 */
-bool    g_system_on  = true;   /* 系统电源状态 */
+float   g_set_temp   = -20.0f;  /* 用户设定温度 */
+uint8_t g_panel_mode = 0;       /* 0: 正常监控, 1: 温度设置模式 */
+bool    g_light_on   = false;   /* 照明灯状态 */
+bool    g_system_on  = true;    /* 系统电源状态 */
 
 static uint32_t s_set_mode_tick = 0;
 #define SET_MODE_TIMEOUT_MS  5000   /* 5秒无操作自动退出设置模式 */
 
 /* ===========================================================================
- * 面板总任务：一个任务同时驱动 PANEL0(纯显示) 和 PANEL1(带按键)
+ * 双面板任务
+ *
+ * PANEL0 (PB6/PB7): 显示温度+图标 + 4按键 (Reset/Set/上/下)
+ * PANEL1 (PB4/PB5): 显示温度+图标 + 4按键 (除霜/照明/点检/电源)
+ *
+ * 两块屏显示内容相同: 正常模式显示SHT30温度, 设置模式显示设定温度
+ * 图标也相同: 除霜/风扇/制冷/加热/灯光等
  * =========================================================================== */
 void Task_Panel_Process(void const *argument)
 {
     (void)argument;
     uint8_t blink_cnt = 0;
 
-    /* 1. 同时初始化两个面板的底层引脚 */
-    HTC2K_Init();   // 初始化 PANEL0 (PB6/PB7)
-    HTC2K_Init1();  // 初始化 PANEL1 (PB4/PB5)
+    /* 初始化两个面板 */
+    HTC2K_Init();   /* PANEL0 (PB6/PB7) */
+    HTC2K_Init1();  /* PANEL1 (PB4/PB5) */
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    g_set_temp = SET_TEMP_TS;  /* 初始化为配置文件默认值 */
+    g_set_temp = SET_TEMP_TS;
 
     for (;;) {
-        /* 读取系统状态数据 */
+        /* 读取系统状态 */
         SysVarData_t sensor;
         SysState_GetSensor(&sensor);
         EventBits_t sys_bits = xEventGroupGetBits(SysEventGroup);
         uint32_t alarms = g_AlarmFlags;
 
         /* ============================================
-         * 模块一：处理 PANEL0 (纯显示屏，无按键)
+         * 构建统一图标 (两块屏共用)
          * ============================================ */
-        g_IconSet.byte = 0;
-        if (sys_bits & ST_DEFROST_ACTIVE) g_IconSet.bits.Def = 1;
-        if (sensor.VAR_LIQUID_LEVEL == 1) g_IconSet.bits.Humi = 1;
-        if (sys_bits & ST_EVAP_FAN_ON)    g_IconSet.bits.Fan = 1;
+        uint8_t icons = 0;
+        icon_type_t icon_common;
+        icon_common.byte = 0;
+
+        if (sys_bits & ST_DEFROST_ACTIVE) icon_common.bits.Def   = 1;
+        if (sys_bits & ST_DEF_HEATING)    icon_common.bits.Heat  = 1;
+        if (sys_bits & ST_EVAP_FAN_ON)    icon_common.bits.Fan   = 1;
+        if (sys_bits & ST_COMP_RUNNING)   icon_common.bits.Ref   = 1;
+        if (g_light_on)                   icon_common.bits.Light = 1;
+        if (g_panel_mode == 1)            icon_common.bits.Set   = 1;
+        if (sensor.VAR_LIQUID_LEVEL == 1) icon_common.bits.Humi  = 1;
+
+        /* 报警时制冷图标闪烁 */
         if (alarms & (ERR_MASK_ALL | WARN_MASK_ALL)) {
             blink_cnt++;
-            if (blink_cnt & 0x04) g_IconSet.bits.Ref = 1; // 报警时图标闪烁
+            if (blink_cnt & 0x04) icon_common.bits.Ref = 1;
+            else                  icon_common.bits.Ref = 0;
         }
 
-        /* 【修改点】PANEL0 永远只专心显示 SHT-30 的温度 */
-        HTC2K_ShowTemp(sensor.VAR_SHT30_TEMP);
-
+        /* 两块屏图标相同 */
+        g_IconSet.byte  = icon_common.byte;
+        g_IconSet1.byte = icon_common.byte;
 
         /* ============================================
-         * 模块二：处理 PANEL1 (操作屏，带按键)
+         * 显示温度 (两块屏内容相同)
          * ============================================ */
-        uint8_t key = HTC2K_ReadKeys1(); // 只扫描 PANEL1 的按键
+        if (g_panel_mode == 0) {
+            /* 正常模式: 显示 SHT-30 环境温度 */
+            HTC2K_ShowTemp(sensor.VAR_SHT30_TEMP);
+            HTC2K_ShowTemp1(sensor.VAR_SHT30_TEMP);
+        } else {
+            /* 设置模式: 显示设定温度 */
+            HTC2K_ShowTemp(g_set_temp);
+            HTC2K_ShowTemp1(g_set_temp);
+        }
 
-        if (key != 0x00 && key != 0xFF) {
-            if (key == KEY_CODE_RST) {
+        /* ============================================
+         * PANEL0 按键: Reset / Set / 上 / 下
+         * ============================================ */
+        uint8_t key0 = HTC2K_ReadKeys();
+
+        if (key0 != 0x00 && key0 != 0xFF) {
+            if (key0 == KEY_CODE_RST) {
+                /* 复位: 退出设置模式, 恢复默认温度 */
                 g_panel_mode = 0;
                 g_set_temp = SET_TEMP_TS;
             }
-            else if (key == KEY_CODE_SET) {
-                g_panel_mode = !g_panel_mode; // 切换设置模式
+            else if (key0 == KEY_CODE_SET) {
+                /* 切换设置模式 */
+                g_panel_mode = !g_panel_mode;
                 s_set_mode_tick = xTaskGetTickCount();
             }
             else if (g_panel_mode == 1) {
-                if (key == KEY_CODE_UP) { g_set_temp += 0.5f; s_set_mode_tick = xTaskGetTickCount(); }
-                if (key == KEY_CODE_DOWN){ g_set_temp -= 0.5f; s_set_mode_tick = xTaskGetTickCount(); }
+                /* 设置模式下: 上/下调温 */
+                if (key0 == KEY_CODE_UP)   { g_set_temp += 0.5f; s_set_mode_tick = xTaskGetTickCount(); }
+                if (key0 == KEY_CODE_DOWN) { g_set_temp -= 0.5f; s_set_mode_tick = xTaskGetTickCount(); }
                 if (g_set_temp > 20.0f)  g_set_temp = 20.0f;
                 if (g_set_temp < -30.0f) g_set_temp = -30.0f;
             }
-            else if (key == KEY_CODE_DEFROST) {
+            vTaskDelay(pdMS_TO_TICKS(150));  /* 消抖 */
+        }
+
+        /* ============================================
+         * PANEL1 按键: 除霜 / 照明 / 点检 / 电源
+         * ============================================ */
+        uint8_t key1 = HTC2K_ReadKeys1();
+
+        if (key1 != 0x00 && key1 != 0xFF) {
+            if (key1 == KEY_CODE_DEFROST) {
+                /* 一键除霜: 再按取消 */
                 if (sys_bits & ST_DEFROST_ACTIVE) {
-                    /* 正在除霜 → 再按一次手动取消: 清除所有除霜标志 */
                     xEventGroupClearBits(SysEventGroup,
                         ST_DEFROST_ACTIVE | ST_DEF_HEATING | ST_DEF_DRIPPING);
                 } else {
-                    /* 未在除霜 → 手动触发除霜 (仅置总标志, 由defrost任务启动序列) */
                     xEventGroupSetBits(SysEventGroup, ST_DEFROST_ACTIVE);
                 }
             }
-            else if (key == KEY_CODE_LIGHT) {
+            else if (key1 == KEY_CODE_LIGHT) {
+                /* 照明开关 */
                 g_light_on = !g_light_on;
                 BSP_Relay_Set(RELAY_LIGHT, g_light_on ? 1 : 0);
             }
-            else if (key == KEY_CODE_POWER) {
+            else if (key1 == KEY_CODE_INSPECT) {
+                /* 点检键: 预留, 后续进入日志模式 */
+            }
+            else if (key1 == KEY_CODE_POWER) {
+                /* 电源开关 */
                 g_system_on = !g_system_on;
-                if (g_system_on) xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
-                else {
+                if (g_system_on) {
+                    xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
+                } else {
                     xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
                     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
                 }
             }
-            vTaskDelay(pdMS_TO_TICKS(150)); // 按键消抖
+            vTaskDelay(pdMS_TO_TICKS(150));  /* 消抖 */
         }
 
         /* 5秒无操作自动退出设置模式 */
@@ -109,25 +155,7 @@ void Task_Panel_Process(void const *argument)
             }
         }
 
-        /* 更新 PANEL1 的指示灯图标 */
-        g_IconSet1.byte = 0;
-        if (g_panel_mode == 1)            g_IconSet1.bits.Set = 1;
-        if (sys_bits & ST_COMP_RUNNING)   g_IconSet1.bits.Ref = 1;
-        if (sys_bits & ST_EVAP_FAN_ON)    g_IconSet1.bits.Fan = 1;
-        if (sys_bits & ST_DEFROST_ACTIVE) g_IconSet1.bits.Def = 1;
-        if (g_light_on)                   g_IconSet1.bits.Light = 1;
-        if (sys_bits & ST_DEF_HEATING)    g_IconSet1.bits.Heat = 1;
-
-        /* PANEL1 显示内容判断 */
-        if (g_panel_mode == 0) {
-            /* 【确认点】正常模式下，PANEL1 也显示 SHT-30 环境温度 */
-            HTC2K_ShowTemp1(sensor.VAR_SHT30_TEMP);
-        } else {
-            /* 设置模式显示目标设定温度 */
-            HTC2K_ShowTemp1(g_set_temp);
-        }
-
-        /* 任务休眠 50ms，释放 CPU 给其他任务 */
+        /* 任务休眠 50ms */
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
