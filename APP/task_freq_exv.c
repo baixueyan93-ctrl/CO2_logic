@@ -5,6 +5,7 @@
 #include "main.h"
 #include "sys_state.h"
 #include "sys_config.h"
+#include "bsp_exv.h"
 #include <stdbool.h>
 #include <math.h>
 
@@ -78,9 +79,9 @@ static void EXV_SetOpening(float kp)
     if (kp < 0.0f) {
         kp = 0.0f;
     }
-    /* TODO: 确认膨胀阀开度上限值 */
-    if (kp > 500.0f) {
-        kp = 500.0f;
+    /* 上限保护: VKV 阀体全行程 500 步 */
+    if (kp > (float)EXV_TOTAL_STEPS) {
+        kp = (float)EXV_TOTAL_STEPS;
     }
 
     /* 写入全局传感器数据 */
@@ -88,7 +89,9 @@ static void EXV_SetOpening(float kp)
     SysState_GetRawPtr()->VAR_EXV_OPENING = kp;
     SysState_Unlock();
 
-    /* TODO: 通过 bsp_exv 接口实际驱动膨胀阀步进到目标位置 */
+    /* 驱动步进电机到目标位置, 完成后断电省功耗 */
+    BSP_EXV_SetPosition((uint16_t)(kp + 0.5f), EXV_STEP_DELAY_MS);
+    BSP_EXV_DeEnergize();
 }
 
 /* --- 压缩机停机 (ETM错误时调用) --- */
@@ -476,6 +479,10 @@ void Task_FreqExv_Process(void const *argument)
     /* 初始化: 清除PID相关状态 */
     s_prev_delta_t = 0.0f;
     s_prev_dt_valid = false;
+
+    /* 初始化EXV硬件: GPIO配置 + 关阀归零 */
+    BSP_EXV_Init();
+    BSP_EXV_ResetToZero();
 
     /* 等待系统初始化完成 */
     vTaskDelay(pdMS_TO_TICKS(3000));

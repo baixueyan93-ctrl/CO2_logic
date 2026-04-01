@@ -171,8 +171,9 @@ void MX_FREERTOS_Init(void) {
   /* ========== 以下6个逻辑任务暂时注释, 硬件测试阶段只跑传感器+显示 ========== */
 #if 0
   /* 电子膨胀阀控制任务 (普通优先级, 256栈) */
-  osThreadDef(Task_EXV, StartTask_EXV, osPriorityNormal, 0, 256);
-  Task_EXVHandle = osThreadCreate(osThread(Task_EXV), NULL);
+  /* EXV测试任务已停用 — 膨胀阀驱动已融合到 Task_FreqExv (逻辑图4) */
+  // osThreadDef(Task_EXV, StartTask_EXV, osPriorityNormal, 0, 256);
+  // Task_EXVHandle = osThreadCreate(osThread(Task_EXV), NULL);
 
   /* 温度控制主任务 (逻辑图1, 普通优先级, 512栈) */
   osThreadDef(Task_TempCtrl, StartTask_TempCtrl, osPriorityNormal, 0, 512);
