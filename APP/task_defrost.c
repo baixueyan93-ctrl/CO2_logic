@@ -72,7 +72,7 @@ static void Defrost_StartCompressor(float freq_hz)
 }
 
 /* --- 膨胀阀步进到除霜位置 --- */
-#define DEF_EXV_POSITION   500   /* 除霜时全开 (让高温制冷剂通过蒸发器) */
+#define DEF_EXV_POSITION   1000  /* 除霜时全开 (让高温制冷剂通过蒸发器) */
 
 static void Defrost_ValveStep(void)
 {

@@ -33,16 +33,9 @@ void Task_CondFan_Process(void const *argument);
 void CondFan_MainProcess(void);
 
 /* ===========================================================================
- * 硬件接口定义 (待确认后填入实际引脚)
+ * 硬件接口说明
  *
- * 3台冷凝风机各有独立继电器:
- *   TODO: 确认冷凝风机继电器GPIO引脚
+ * 冷凝风机: 通过 BSP_Relay_On/Off(RELAY_COND_FAN) 控制 (K5, PC8, 1控3)
  * =========================================================================== */
-#define COND_FAN1_GPIO_PORT     GPIOD           /* 待确认 */
-#define COND_FAN1_GPIO_PIN      GPIO_PIN_3      /* 待确认 */
-#define COND_FAN2_GPIO_PORT     GPIOD           /* 待确认 */
-#define COND_FAN2_GPIO_PIN      GPIO_PIN_4      /* 待确认 */
-#define COND_FAN3_GPIO_PORT     GPIOD           /* 待确认 */
-#define COND_FAN3_GPIO_PIN      GPIO_PIN_5      /* 待确认 */
 
 #endif /* TASK_COND_FAN_H */

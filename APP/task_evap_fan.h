@@ -30,12 +30,9 @@ void EvapFan_ModeF2(void);     /* F1=2: 常开模式      */
 void EvapFan_ModeF4(void);     /* F1=4: 温度合格模式  */
 
 /* ===========================================================================
- * 硬件接口定义 (待确认后填入实际引脚)
+ * 硬件接口说明
  *
- * 蒸发风机继电器 (1控6, 一个继电器控制6台风机):
- *   TODO: 确认蒸发风机继电器GPIO引脚
+ * 蒸发风机: 通过 BSP_Relay_On/Off(RELAY_EVAP_FAN) 控制 (K1, PC9, 1控2)
  * =========================================================================== */
-#define EVAP_FAN_GPIO_PORT      GPIOD           /* 待确认 */
-#define EVAP_FAN_GPIO_PIN       GPIO_PIN_2      /* 待确认 */
 
 #endif /* TASK_EVAP_FAN_H */

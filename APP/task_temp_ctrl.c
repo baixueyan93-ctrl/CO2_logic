@@ -5,6 +5,7 @@
 #include "main.h"
 #include "sys_state.h"
 #include "sys_config.h"
+#include "bsp_relay.h"
 #include <stdbool.h>
 
 /* ===========================================================================
@@ -102,23 +103,18 @@ static void NotifyUser(uint32_t alarm_code)
     (void)alarm_code;
 }
 
-/* --- 蒸发风扇关闭 (逻辑图3实现, 此处为桩) --- */
+/* --- 蒸发风扇关闭 (K1继电器, 1控2) --- */
 static void EvapFan_AllOff(void)
 {
-    /* TODO: 逻辑图3(风机流程)实现后替换
-     * 关闭所有蒸发风扇
-     */
+    BSP_Relay_Off(RELAY_EVAP_FAN);
     xEventGroupClearBits(SysEventGroup, ST_EVAP_FAN_ON);
 }
 
-/* --- 冷凝风扇关闭 (逻辑图6实现, 此处为桩) --- */
+/* --- 冷凝风扇关闭 (K5继电器, 1控3) --- */
 static void CondFan_AllOff(void)
 {
-    /* TODO: 逻辑图6(冷凝风机流程)实现后替换
-     * 关闭所有冷凝风扇
-     */
-    xEventGroupClearBits(SysEventGroup,
-        ST_COND_FAN1_ON | ST_COND_FAN2_ON | ST_COND_FAN3_ON);
+    BSP_Relay_Off(RELAY_COND_FAN);
+    xEventGroupClearBits(SysEventGroup, ST_COND_FAN1_ON);
 }
 
 /* --- 柜温传感器有效性判断 ---

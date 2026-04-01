@@ -5,6 +5,7 @@
 #include "main.h"
 #include "sys_state.h"
 #include "sys_config.h"
+#include "bsp_relay.h"
 #include <stdbool.h>
 
 /* ===========================================================================
@@ -44,51 +45,18 @@
  *  内部辅助函数 / 硬件操作桩
  * =================================================================== */
 
-/* --- 冷凝风机1 开/关 --- */
-static void CondFan1_On(void)
+/* --- 冷凝风机开启 (K5 继电器, PC8, 1控3) --- */
+static void CondFan_On(void)
 {
-    HAL_GPIO_WritePin(COND_FAN1_GPIO_PORT, COND_FAN1_GPIO_PIN, GPIO_PIN_SET);
+    BSP_Relay_On(RELAY_COND_FAN);
     xEventGroupSetBits(SysEventGroup, ST_COND_FAN1_ON);
 }
 
-static void CondFan1_Off(void)
-{
-    HAL_GPIO_WritePin(COND_FAN1_GPIO_PORT, COND_FAN1_GPIO_PIN, GPIO_PIN_RESET);
-    xEventGroupClearBits(SysEventGroup, ST_COND_FAN1_ON);
-}
-
-/* --- 冷凝风机2 开/关 --- */
-static void CondFan2_On(void)
-{
-    HAL_GPIO_WritePin(COND_FAN2_GPIO_PORT, COND_FAN2_GPIO_PIN, GPIO_PIN_SET);
-    xEventGroupSetBits(SysEventGroup, ST_COND_FAN2_ON);
-}
-
-static void CondFan2_Off(void)
-{
-    HAL_GPIO_WritePin(COND_FAN2_GPIO_PORT, COND_FAN2_GPIO_PIN, GPIO_PIN_RESET);
-    xEventGroupClearBits(SysEventGroup, ST_COND_FAN2_ON);
-}
-
-/* --- 冷凝风机3 开/关 --- */
-static void CondFan3_On(void)
-{
-    HAL_GPIO_WritePin(COND_FAN3_GPIO_PORT, COND_FAN3_GPIO_PIN, GPIO_PIN_SET);
-    xEventGroupSetBits(SysEventGroup, ST_COND_FAN3_ON);
-}
-
-static void CondFan3_Off(void)
-{
-    HAL_GPIO_WritePin(COND_FAN3_GPIO_PORT, COND_FAN3_GPIO_PIN, GPIO_PIN_RESET);
-    xEventGroupClearBits(SysEventGroup, ST_COND_FAN3_ON);
-}
-
-/* --- 关闭所有冷凝风机 --- */
+/* --- 冷凝风机关闭 --- */
 static void CondFan_AllOff(void)
 {
-    CondFan1_Off();
-    CondFan2_Off();
-    CondFan3_Off();
+    BSP_Relay_Off(RELAY_COND_FAN);
+    xEventGroupClearBits(SysEventGroup, ST_COND_FAN1_ON);
 }
 
 
@@ -140,9 +108,7 @@ void CondFan_MainProcess(void)
     EventBits_t sys_bits = xEventGroupGetBits(SysEventGroup);
 
     bool comp_on = (sys_bits & ST_COMP_RUNNING) != 0;
-    bool any_fan_on = (sys_bits & (ST_COND_FAN1_ON |
-                                    ST_COND_FAN2_ON |
-                                    ST_COND_FAN3_ON)) != 0;
+    bool fan_on = (sys_bits & ST_COND_FAN1_ON) != 0;
 
     /* ================================================================
      *  第1步: 压缩机运行?
@@ -157,7 +123,7 @@ void CondFan_MainProcess(void)
          *
          *  压缩机停了就不需要冷凝散热
          * ============================================================ */
-        if (any_fan_on) {
+        if (fan_on) {
             CondFan_AllOff();
         }
         return;
@@ -166,95 +132,28 @@ void CondFan_MainProcess(void)
     /* ================================================================
      *  Y → 压缩机运行中
      *
-     *  第2步: 风机正在运行?
-     * ================================================================ */
-    if (any_fan_on) {
-        /* ============================================================
-         *  Y → 风机已经在运行
-         *
-         *  时间逻辑? (红色标注, 未来扩展)
-         *
-         *  TODO: 未来可根据运行时间调整风机台数
-         *        例如: 压缩机运行超过X分钟后逐步增加风机
-         *        或: 根据冷凝温度变化趋势动态调整
-         *
-         *  当前实现: 已在运行时也按温度逻辑重新评估台数
-         *           (这样温度变化时可以动态增减风机)
-         * ============================================================ */
-        /* 继续往下执行温度逻辑, 动态调整风机台数 */
-    }
-
-    /* ================================================================
-     *  第3步: 温度逻辑 — 根据冷凝温度确定风机编号
-     *
-     *  读取冷凝器温度, 按阶梯决定投入几台风机
-     *
-     *  阶梯计算:
-     *    ON温度  = SET_COND_FAN_ON_T  = 35℃
-     *    OFF温度 = SET_COND_FAN_OFF_T = 25℃
-     *    阶梯宽度 = (35 - 25) / 2 = 5℃
-     *
-     *    阈值:
-     *      T ≥ 35℃ (ON温度)          → 3台全开
-     *      T ≥ 30℃ (OFF温度+阶梯)    → 2台开
-     *      T ≥ 25℃ (OFF温度)         → 1台开
-     *      T <  25℃                  → 全部关闭
+     *  温度逻辑 — 1控3 回差控制:
+     *    冷凝温度 ≥ ON温度 (35℃) → 开启风机
+     *    冷凝温度 ≤ OFF温度(25℃) → 关闭风机
+     *    中间区域 → 保持当前状态 (回差防抖)
      * ================================================================ */
     SysVarData_t sensor;
     SysState_GetSensor(&sensor);
 
     float cond_temp = sensor.VAR_COND_TEMP;
 
-    /* 阶梯阈值计算 */
-    float t_step = (SET_COND_FAN_ON_T - SET_COND_FAN_OFF_T) / 2.0f;  /* 5℃ */
-    float t_fan1 = SET_COND_FAN_OFF_T;                 /* 25℃: 开第1台 */
-    float t_fan2 = SET_COND_FAN_OFF_T + t_step;        /* 30℃: 开第2台 */
-    float t_fan3 = SET_COND_FAN_ON_T;                  /* 35℃: 开第3台 */
-
-    /* 确定需要投入的风机台数 */
-    uint8_t fans_needed;
-
-    if (cond_temp >= t_fan3) {
-        fans_needed = 3;    /* ≥ 35℃: 3台全开 (流程图编号3) */
-    } else if (cond_temp >= t_fan2) {
-        fans_needed = 2;    /* 30~35℃: 2台开 (流程图编号2) */
-    } else if (cond_temp >= t_fan1) {
-        fans_needed = 1;    /* 25~30℃: 1台开 (流程图编号1) */
-    } else {
-        fans_needed = 0;    /* < 25℃: 全部关闭 */
+    if (cond_temp >= SET_COND_FAN_ON_T) {
+        /* 冷凝温度 ≥ 35℃ → 开启风机散热 */
+        if (!fan_on) {
+            CondFan_On();
+        }
+    } else if (cond_temp <= SET_COND_FAN_OFF_T) {
+        /* 冷凝温度 ≤ 25℃ → 关闭风机 */
+        if (fan_on) {
+            CondFan_AllOff();
+        }
     }
-
-    /* ================================================================
-     *  第4步: 开启/关闭风机 + 标记风机正在运行
-     *
-     *  流程图: 确定风机编号 → 开启风机 → 标记风机正在运行
-     *
-     *  按需投入: 需要几台开几台, 多余的关掉
-     *  顺序: 先开1→2→3, 先关3→2→1
-     * ================================================================ */
-    switch (fans_needed) {
-    case 3:
-        CondFan1_On();
-        CondFan2_On();
-        CondFan3_On();
-        break;
-
-    case 2:
-        CondFan1_On();
-        CondFan2_On();
-        CondFan3_Off();
-        break;
-
-    case 1:
-        CondFan1_On();
-        CondFan2_Off();
-        CondFan3_Off();
-        break;
-
-    default:  /* 0: 全部关闭 */
-        CondFan_AllOff();
-        break;
-    }
+    /* 25~35℃ 之间保持当前状态 (回差) */
 }
 
 

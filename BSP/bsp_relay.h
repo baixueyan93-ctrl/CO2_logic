@@ -15,18 +15,18 @@
  *   冷凝风扇       K5      PC8      GPIOC,PIN8
  *   化霜热丝       K7      PC7      GPIOC,PIN7
  *   滑油热丝       K2      PC6      GPIOC,PIN6
- *   凝露热丝       K6      PD8      GPIOD,PIN8
- *   照明开关       K8      PD9      GPIOD,PIN9
+ *   凝露热丝       K6      PD15     GPIOD,PIN15
+ *   照明开关       K8      PD14     GPIOD,PIN14
  * ============================================================ */
 
 /* --- 继电器编号枚举 --- */
 typedef enum {
-    RELAY_EVAP_FAN   = 0,   /* 蒸发风扇  K1  PC9 */
-    RELAY_COND_FAN   = 1,   /* 冷凝风扇  K5  PC8 */
-    RELAY_DEF_HEATER = 2,   /* 化霜热丝  K7  PC7 */
-    RELAY_OIL_HEATER = 3,   /* 滑油热丝  K2  PC6 */
-    RELAY_DEW_HEATER = 4,   /* 凝露热丝  K6  PD8 */
-    RELAY_LIGHT      = 5,   /* 照明开关  K8  PD9 */
+    RELAY_EVAP_FAN   = 0,   /* 蒸发风扇  K1  PC9  */
+    RELAY_COND_FAN   = 1,   /* 冷凝风扇  K5  PC8  */
+    RELAY_DEF_HEATER = 2,   /* 化霜热丝  K7  PC7  */
+    RELAY_OIL_HEATER = 3,   /* 滑油热丝  K2  PC6  */
+    RELAY_DEW_HEATER = 4,   /* 凝露热丝  K6  PD15 */
+    RELAY_LIGHT      = 5,   /* 照明开关  K8  PD14 */
     RELAY_COUNT      = 6
 } Relay_ID;
 

@@ -5,6 +5,7 @@
 #include "main.h"
 #include "sys_state.h"
 #include "sys_config.h"
+#include "bsp_relay.h"
 #include <stdbool.h>
 
 /* ===========================================================================
@@ -48,17 +49,16 @@
  *  内部辅助函数 / 硬件操作桩
  * =================================================================== */
 
-/* --- 蒸发风机开启 --- */
+/* --- 蒸发风机开启 (K1 继电器, PC9, 1控2) --- */
 static void EvapFan_On(void)
 {
-    /* TODO: 确认实际GPIO引脚后填入 */
-    HAL_GPIO_WritePin(EVAP_FAN_GPIO_PORT, EVAP_FAN_GPIO_PIN, GPIO_PIN_SET);
+    BSP_Relay_On(RELAY_EVAP_FAN);
 }
 
 /* --- 蒸发风机关闭 --- */
 static void EvapFan_Off(void)
 {
-    HAL_GPIO_WritePin(EVAP_FAN_GPIO_PORT, EVAP_FAN_GPIO_PIN, GPIO_PIN_RESET);
+    BSP_Relay_Off(RELAY_EVAP_FAN);
 }
 
 /* --- 标记风机正在运行 --- */

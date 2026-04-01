@@ -16,8 +16,8 @@ static const Relay_Map_t relay_map[RELAY_COUNT] = {
     [RELAY_COND_FAN]   = { GPIOC, GPIO_PIN_8,  "CondFan"  },   /* K5  PC8 冷凝风扇 */
     [RELAY_DEF_HEATER] = { GPIOC, GPIO_PIN_7,  "DefHtr"   },   /* K7  PC7 化霜热丝 */
     [RELAY_OIL_HEATER] = { GPIOC, GPIO_PIN_6,  "OilHtr"   },   /* K2  PC6 滑油热丝 */
-    [RELAY_DEW_HEATER] = { GPIOD, GPIO_PIN_8,  "DewHtr"   },   /* K6  PD8 凝露热丝 */
-    [RELAY_LIGHT]      = { GPIOD, GPIO_PIN_9,  "Light"    },   /* K8  PD9 照明开关 */
+    [RELAY_DEW_HEATER] = { GPIOD, GPIO_PIN_15, "DewHtr"   },   /* K6  PD15 凝露热丝 */
+    [RELAY_LIGHT]      = { GPIOD, GPIO_PIN_14, "Light"    },   /* K8  PD14 照明开关 */
 };
 
 /* ============================================================
@@ -43,8 +43,8 @@ void BSP_Relay_Init(void)
     gpio.Pin = GPIO_PIN_6 | GPIO_PIN_7 | GPIO_PIN_8 | GPIO_PIN_9;
     HAL_GPIO_Init(GPIOC, &gpio);
 
-    /* PD8, PD9 */
-    gpio.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+    /* PD14, PD15 */
+    gpio.Pin = GPIO_PIN_14 | GPIO_PIN_15;
     HAL_GPIO_Init(GPIOD, &gpio);
 }
 

@@ -3,6 +3,7 @@
 #include "task.h"
 #include "event_groups.h"
 #include "bsp_htc_2k.h"
+#include "bsp_relay.h"
 #include "sys_state.h"
 #include "sys_config.h"
 #include <stdbool.h>
@@ -88,6 +89,7 @@ void Task_Panel_Process(void const *argument)
             }
             else if (key == KEY_CODE_LIGHT) {
                 g_light_on = !g_light_on;
+                BSP_Relay_Set(RELAY_LIGHT, g_light_on ? 1 : 0);
             }
             else if (key == KEY_CODE_POWER) {
                 g_system_on = !g_system_on;
