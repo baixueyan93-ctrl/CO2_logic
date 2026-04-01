@@ -12,7 +12,7 @@
 /* ===========================================================================
  * 面板操作全局变量
  * =========================================================================== */
-float   g_set_temp   = -20.0f;  /* 用户设定温度 */
+float   g_set_temp   = SET_TEMP_TS;  /* 用户设定温度, 默认跟随Ts */
 uint8_t g_panel_mode = 0;       /* 0: 正常监控, 1: 温度设置模式 */
 bool    g_light_on   = false;   /* 照明灯状态 */
 bool    g_system_on  = true;    /* 系统电源状态 */
@@ -39,7 +39,7 @@ void Task_Panel_Process(void const *argument)
     HTC2K_Init1();  /* PANEL1 (PB4/PB5) */
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    g_set_temp = SET_TEMP_TS;
+    g_set_temp = g_set_temp;
 
     for (;;) {
         /* 读取系统状态 */
@@ -96,7 +96,7 @@ void Task_Panel_Process(void const *argument)
             if (key0 == KEY_CODE_RST) {
                 /* 复位: 退出设置模式, 恢复默认温度 */
                 g_panel_mode = 0;
-                g_set_temp = SET_TEMP_TS;
+                g_set_temp = g_set_temp;
             }
             else if (key0 == KEY_CODE_SET) {
                 /* 切换设置模式 */
