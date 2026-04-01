@@ -20,7 +20,7 @@
 /* --- 引脚定义 --- */
 #define EXV0_PM0A_PORT   GPIOD          /* B-  PD11 */
 #define EXV0_PM0A_PIN    GPIO_PIN_11
-#define EXV0_PM0B_PORT   GPIOA          /* A-  PA10 */
+#define EXV0_PM0B_PORT   GPIOD          /* A-  PD10 */
 #define EXV0_PM0B_PIN    GPIO_PIN_10
 #define EXV0_PM0C_PORT   GPIOD          /* B+  PD9  */
 #define EXV0_PM0C_PIN    GPIO_PIN_9

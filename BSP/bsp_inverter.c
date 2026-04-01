@@ -1,133 +1,152 @@
 #include "bsp_inverter.h"
-#include "FreeRTOS.h"
-#include "task.h"
 #include <string.h>
 
 /* ===================================================================
- *  变频器通信驱动 (USART2 中断收发, 16字节帧)
+ *  变频器通信驱动 (USART1 中断收发, 16字节帧)
+ *
+ *  PA9  = TXD (4851)
+ *  PA10 = RXD (4851)
  *
  *  主控板(下行发送) → 变频板(上行回传)
- *  发送后等待变频板回传相同帧进行校验
+ *  发送后变频板回传相同帧进行校验
  * =================================================================== */
 
-/* --- USART2 句柄 --- */
-UART_HandleTypeDef huart2;
+/* --- USART1 句柄 --- */
+UART_HandleTypeDef huart1;
 
 /* --- 收发缓冲 --- */
-static uint8_t s_tx_buf[INV_FRAME_LEN];
-static uint8_t s_rx_buf[INV_FRAME_LEN];
-static volatile bool s_ack_ok   = false;   /* 回传校验结果   */
-static volatile bool s_rx_done  = false;   /* 接收完成标志   */
+uint8_t InvTxBuf[INV_FRAME_LEN];
+uint8_t InvRxBuf[INV_FRAME_LEN];
+volatile uint8_t InvAckOK  = 0;       /* 回传校验OK标志 */
+volatile uint8_t InvNewCmd = 0;       /* 新命令标志: 1=启动 2=调频 3=停机 */
 
 /* ===================================================================
- *  BSP_Inverter_Init — 初始化 USART2 (PA2=TX, PA3=RX) + 开启接收中断
+ *  MX_USART1_UART_Init — 初始化 USART1 (PA9=TX, PA10=RX)
  * =================================================================== */
 void BSP_Inverter_Init(void)
 {
     /* ---- GPIO 配置 ---- */
-    __HAL_RCC_USART2_CLK_ENABLE();
+    __HAL_RCC_USART1_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
     GPIO_InitTypeDef gpio = {0};
-    gpio.Pin       = GPIO_PIN_2 | GPIO_PIN_3;   /* PA2=TX, PA3=RX */
+    gpio.Pin       = GPIO_PIN_9 | GPIO_PIN_10;    /* PA9=TX, PA10=RX */
     gpio.Mode      = GPIO_MODE_AF_PP;
     gpio.Pull      = GPIO_PULLUP;
     gpio.Speed     = GPIO_SPEED_FREQ_HIGH;
-    gpio.Alternate = GPIO_AF7_USART2;
+    gpio.Alternate = GPIO_AF7_USART1;
     HAL_GPIO_Init(GPIOA, &gpio);
 
-    /* ---- USART2 参数 ---- */
-    huart2.Instance          = USART2;
-    huart2.Init.BaudRate     = 9600;
-    huart2.Init.WordLength   = UART_WORDLENGTH_8B;
-    huart2.Init.StopBits     = UART_STOPBITS_1;
-    huart2.Init.Parity       = UART_PARITY_NONE;
-    huart2.Init.Mode         = UART_MODE_TX_RX;
-    huart2.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
-    huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-    HAL_UART_Init(&huart2);
+    /* ---- USART1 参数 ---- */
+    huart1.Instance          = USART1;
+    huart1.Init.BaudRate     = 9600;
+    huart1.Init.WordLength   = UART_WORDLENGTH_8B;
+    huart1.Init.StopBits     = UART_STOPBITS_1;
+    huart1.Init.Parity       = UART_PARITY_NONE;
+    huart1.Init.Mode         = UART_MODE_TX_RX;
+    huart1.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
+    huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+    HAL_UART_Init(&huart1);
 
-    /* ---- 使能 USART2 中断 ---- */
-    HAL_NVIC_SetPriority(USART2_IRQn, 6, 0);
-    HAL_NVIC_EnableIRQ(USART2_IRQn);
+    /* ---- 使能 USART1 中断 ---- */
+    HAL_NVIC_SetPriority(USART1_IRQn, 6, 0);
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
 
     /* ---- 开启16字节接收中断 ---- */
-    HAL_UART_Receive_IT(&huart2, s_rx_buf, INV_FRAME_LEN);
+    HAL_UART_Receive_IT(&huart1, InvRxBuf, INV_FRAME_LEN);
 }
 
 /* ===================================================================
- *  组装帧并发送
+ *  组装16字节帧并发送
  * =================================================================== */
-static bool Inverter_SendFrame(uint8_t cmd, uint16_t freq_hz)
+static void Inverter_SendFrame(uint8_t cmd, uint16_t freq_hz)
 {
-    /* 组帧 */
-    memset(s_tx_buf, 0x00, INV_FRAME_LEN);
-    s_tx_buf[0]  = INV_FRAME_HEAD;       /* 0x55 */
-    s_tx_buf[1]  = cmd;                   /* 命令 */
-    s_tx_buf[2]  = (uint8_t)(freq_hz & 0xFF);        /* 频率低字节 */
-    s_tx_buf[3]  = (uint8_t)((freq_hz >> 8) & 0xFF); /* 频率高字节 */
-    s_tx_buf[15] = INV_FRAME_TAIL;       /* 0x56 */
+    uint8_t i = 0;
 
-    /* 清除上次状态 */
-    s_ack_ok  = false;
-    s_rx_done = false;
+    /* 限幅 */
+    if (freq_hz > INV_FREQ_MAX) freq_hz = INV_FREQ_MAX;
+    if (cmd != INV_CMD_STOP && freq_hz < INV_FREQ_MIN) freq_hz = INV_FREQ_MIN;
+
+    /* 清空缓冲 */
+    for (i = 0; i < INV_FRAME_LEN; i++)
+    {
+        InvTxBuf[i] = 0x00;
+    }
+
+    /* 组帧 */
+    InvTxBuf[0]  = INV_FRAME_HEAD;                    /* 0x55 帧头 */
+    InvTxBuf[1]  = cmd;                                /* 命令字节 */
+    InvTxBuf[2]  = (uint8_t)(freq_hz & 0xFF);         /* 频率低字节 */
+    InvTxBuf[3]  = (uint8_t)((freq_hz >> 8) & 0xFF);  /* 频率高字节 */
+    InvTxBuf[15] = INV_FRAME_TAIL;                     /* 0x56 帧尾 */
+
+    /* 清除回传标志 */
+    InvAckOK = 0;
 
     /* 发送 */
-    if (HAL_UART_Transmit(&huart2, s_tx_buf, INV_FRAME_LEN, 100) != HAL_OK) {
-        return false;
-    }
+    HAL_UART_Transmit(&huart1, (uint8_t*)InvTxBuf, INV_FRAME_LEN, 1000);
+}
 
-    /* 等待变频板回传 (最多200ms) */
-    for (uint8_t i = 0; i < 40; i++) {
-        vTaskDelay(pdMS_TO_TICKS(5));
-        if (s_rx_done) {
-            return s_ack_ok;
+/* ===================================================================
+ *  公开 API — 发送启动/停机/调频命令
+ * =================================================================== */
+void BSP_Inverter_SendStart(uint16_t freq_hz)
+{
+    Inverter_SendFrame(INV_CMD_START, freq_hz);
+    InvNewCmd = 1;
+}
+
+void BSP_Inverter_SendStop(void)
+{
+    Inverter_SendFrame(INV_CMD_STOP, 0);
+    InvNewCmd = 3;
+}
+
+void BSP_Inverter_SendFreq(uint16_t freq_hz)
+{
+    Inverter_SendFrame(INV_CMD_SET_FREQ, freq_hz);
+    InvNewCmd = 2;
+}
+
+/*********************************************************************************
+ * @brief HAL_UART_RxCpltCallback, called in USART1 interrupt
+ * @param huart
+ * @retval None
+ *********************************************************************************/
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    uint8_t i = 0;
+
+    if (huart->Instance == USART1)
+    {
+        if (InvRxBuf[0] == 0x55)
+        {
+            if (InvRxBuf[15] == 0x56)                            /* 首尾均正确 */
+            {
+                /* 逐字节校验回传帧是否与发送帧一致 */
+                InvAckOK = 1;
+                for (i = 0; i < INV_FRAME_LEN; i++)
+                {
+                    if (InvRxBuf[i] != InvTxBuf[i])
+                    {
+                        InvAckOK = 0;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                InvAckOK = 0;                                     /* 帧尾错误 */
+                HAL_UART_Transmit(&huart1, (uint8_t*)InvTxBuf, INV_FRAME_LEN, 1000);  /* 重发 */
+            }
         }
+        else
+        {
+            InvAckOK = 0;                                         /* 帧头错误 */
+            HAL_UART_Transmit(&huart1, (uint8_t*)InvTxBuf, INV_FRAME_LEN, 1000);      /* 重发 */
+        }
+
+        /* 重新开启16字节接收中断 */
+        HAL_UART_Receive_IT(&huart1, InvRxBuf, INV_FRAME_LEN);
     }
-    return false;  /* 超时 */
-}
-
-/* ===================================================================
- *  公开 API
- * =================================================================== */
-bool BSP_Inverter_Start(uint16_t freq_hz)
-{
-    return Inverter_SendFrame(INV_CMD_START, freq_hz);
-}
-
-bool BSP_Inverter_Stop(void)
-{
-    return Inverter_SendFrame(INV_CMD_STOP, 0);
-}
-
-bool BSP_Inverter_SetFreq(uint16_t freq_hz)
-{
-    return Inverter_SendFrame(INV_CMD_SET_FREQ, freq_hz);
-}
-
-bool BSP_Inverter_IsAckOK(void)
-{
-    return s_ack_ok;
-}
-
-/* ===================================================================
- *  BSP_Inverter_RxCallback — 接收完成回调
- *
- *  在 HAL_UART_RxCpltCallback 中调用
- *  校验: 回传帧必须与发送帧完全一致
- * =================================================================== */
-void BSP_Inverter_RxCallback(void)
-{
-    /* 校验帧头帧尾 */
-    if (s_rx_buf[0] == INV_FRAME_HEAD && s_rx_buf[15] == INV_FRAME_TAIL) {
-        /* 逐字节比较发送帧和回传帧 */
-        s_ack_ok = (memcmp(s_tx_buf, s_rx_buf, INV_FRAME_LEN) == 0);
-    } else {
-        s_ack_ok = false;
-    }
-
-    s_rx_done = true;
-
-    /* 重新开启接收, 等待下一次回传 */
-    HAL_UART_Receive_IT(&huart2, s_rx_buf, INV_FRAME_LEN);
 }

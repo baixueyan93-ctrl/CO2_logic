@@ -3,10 +3,9 @@
 
 #include "main.h"
 #include <stdint.h>
-#include <stdbool.h>
 
 /* ===================================================================
- *  变频器通信驱动 (USART2, PA2=TX, PA3=RX)
+ *  变频器通信驱动 (USART1, PA9=TX, PA10=RX)
  *
  *  协议: 16字节帧, 中断收发
  *
@@ -21,7 +20,7 @@
  *  上行帧 (变频板→主控):
  *    变频板原样回传下行帧用于校验
  *
- *  频率范围: 0~360 Hz, 1Hz = 15 RPM
+ *  频率范围: 80~320 Hz (1Hz=15RPM, 1200~4800RPM)
  * =================================================================== */
 
 /* --- 命令码 --- */
@@ -34,12 +33,21 @@
 #define INV_FRAME_HEAD      0x55
 #define INV_FRAME_TAIL      0x56
 
+/* --- 频率限制 --- */
+#define INV_FREQ_MIN        80      /* 80Hz  = 1200RPM */
+#define INV_FREQ_MAX        320     /* 320Hz = 4800RPM */
+
+/* --- 全局变量 (供中断使用) --- */
+extern UART_HandleTypeDef huart1;
+extern uint8_t InvTxBuf[INV_FRAME_LEN];
+extern uint8_t InvRxBuf[INV_FRAME_LEN];
+extern volatile uint8_t InvAckOK;
+extern volatile uint8_t InvNewCmd;
+
 /* --- 公开 API --- */
-void     BSP_Inverter_Init(void);                   /* 初始化USART2 + 开启接收中断 */
-bool     BSP_Inverter_Start(uint16_t freq_hz);      /* 启动压缩机, 设定初始频率    */
-bool     BSP_Inverter_Stop(void);                   /* 停止压缩机                  */
-bool     BSP_Inverter_SetFreq(uint16_t freq_hz);    /* 调整运行频率                */
-bool     BSP_Inverter_IsAckOK(void);                /* 上次发送是否收到正确回传    */
-void     BSP_Inverter_RxCallback(void);             /* 接收完成回调 (中断中调用)   */
+void BSP_Inverter_Init(void);
+void BSP_Inverter_SendStart(uint16_t freq_hz);
+void BSP_Inverter_SendStop(void);
+void BSP_Inverter_SendFreq(uint16_t freq_hz);
 
 #endif /* BSP_INVERTER_H */

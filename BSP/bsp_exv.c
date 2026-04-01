@@ -52,27 +52,20 @@ void BSP_EXV_Init(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-    /* 使能 GPIOD + GPIOA 时钟 */
     __HAL_RCC_GPIOD_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
 
     /* 所有引脚先拉低 */
-    HAL_GPIO_WritePin(EXV0_PM0A_PORT, EXV0_PM0A_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(EXV0_PM0B_PORT, EXV0_PM0B_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(EXV0_PM0C_PORT, EXV0_PM0C_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(EXV0_PM0D_PORT, EXV0_PM0D_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOD,
+        EXV0_PM0A_PIN | EXV0_PM0B_PIN | EXV0_PM0C_PIN | EXV0_PM0D_PIN,
+        GPIO_PIN_RESET);
 
+    /* 配置 PD8, PD9, PD10, PD11 为推挽输出 */
+    GPIO_InitStruct.Pin   = EXV0_PM0A_PIN | EXV0_PM0B_PIN |
+                            EXV0_PM0C_PIN | EXV0_PM0D_PIN;
     GPIO_InitStruct.Mode  = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull  = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-
-    /* 配置 PD8, PD9, PD11 (PM0D, PM0C, PM0A) */
-    GPIO_InitStruct.Pin = EXV0_PM0A_PIN | EXV0_PM0C_PIN | EXV0_PM0D_PIN;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-    /* 配置 PA10 (PM0B) */
-    GPIO_InitStruct.Pin = EXV0_PM0B_PIN;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
     s_exv_position = 0;
     s_phase_index  = 0;
@@ -83,10 +76,9 @@ void BSP_EXV_Init(void)
  * =================================================================== */
 void BSP_EXV_DeEnergize(void)
 {
-    HAL_GPIO_WritePin(EXV0_PM0A_PORT, EXV0_PM0A_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(EXV0_PM0B_PORT, EXV0_PM0B_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(EXV0_PM0C_PORT, EXV0_PM0C_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(EXV0_PM0D_PORT, EXV0_PM0D_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOD,
+        EXV0_PM0A_PIN | EXV0_PM0B_PIN | EXV0_PM0C_PIN | EXV0_PM0D_PIN,
+        GPIO_PIN_RESET);
 }
 
 /* ===================================================================
