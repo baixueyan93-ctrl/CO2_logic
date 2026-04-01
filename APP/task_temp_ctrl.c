@@ -731,14 +731,8 @@ void TempCtrl_OilHeatControl(void)
     SysVarData_t sensor;
     SysState_GetSensor(&sensor);
 
-    /* VAR_AMBIENT_TEMP 暂无传感器, 用 SHT30 柜温代替 */
-    if (sensor.VAR_SHT30_TEMP <= SET_OIL_HEAT_TEMP) {
-        /* 环境温度 ≤ 10°C → 油壳加热开 (防止冷凝液稀释润滑油) */
-        OilHeater_On();
-    } else {
-        /* 环境温度 > 10°C → 油壳加热关 */
-        OilHeater_Off();
-    }
+    /* TODO: 油壳加热暂时关闭, 等确认环境温度传感器后再启用 */
+    OilHeater_Off();
 }
 
 
