@@ -23,16 +23,16 @@
  *  内部辅助函数 / 硬件操作桩 (待硬件资料确认后实现)
  * =================================================================== */
 
-/* --- 油壳加热继电器 K2 控制 --- */
+/* --- 油壳加热器控制 (K2 继电器, PC6) --- */
 static void OilHeater_On(void)
 {
-    HAL_GPIO_WritePin(OIL_HEATER_GPIO_PORT, OIL_HEATER_GPIO_PIN, GPIO_PIN_SET);
+    BSP_Relay_On(RELAY_OIL_HEATER);
     xEventGroupSetBits(SysEventGroup, ST_OIL_HEAT_ON);
 }
 
 static void OilHeater_Off(void)
 {
-    HAL_GPIO_WritePin(OIL_HEATER_GPIO_PORT, OIL_HEATER_GPIO_PIN, GPIO_PIN_RESET);
+    BSP_Relay_Off(RELAY_OIL_HEATER);
     xEventGroupClearBits(SysEventGroup, ST_OIL_HEAT_ON);
 }
 

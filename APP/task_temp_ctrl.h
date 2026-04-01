@@ -35,26 +35,13 @@ void TempCtrl_AlarmProcess(void);      /* 告警(温度压力)处理逻辑     *
 void TempCtrl_MainLogic(void);         /* 温度逻辑(主逻辑)           */
 
 /* ===========================================================================
- * 硬件接口定义 (待确认后填入实际引脚)
+ * 硬件接口说明
  *
- * V13.pdf 参考:
- *   PB1 (VSININ) — 电源电压VDC采集 (ADC输入)
- *   K2  (PSD0D)  — 滑油热丝/油壳加热继电器输出
+ * 油壳加热器: BSP_Relay_On/Off(RELAY_OIL_HEATER) — K2继电器 PC6
+ * 蒸发风扇:   BSP_Relay_On/Off(RELAY_EVAP_FAN)   — K1继电器 PC9
+ * 冷凝风扇:   BSP_Relay_On/Off(RELAY_COND_FAN)   — K5继电器 PC8
+ * VDC电压:    通过 task_adc 采集, 本模块从 VAR_VDC_VOLTAGE 读取
+ * 压缩机:     变频器通信接口 (待实现)
  * =========================================================================== */
-
-/* --- VDC电压采集 (PB1/VSININ) ---
- * TODO: 确认ADC通道号, 当前通过 VAR_VDC_VOLTAGE 从sys_state读取
- *       采集驱动应在 task_adc 中完成, 本模块只读取结果
- */
-
-/* --- 油壳加热继电器 K2 (PSD0D) ---
- * TODO: 确认实际GPIO引脚, 暂定义占位宏
- */
-#define OIL_HEATER_GPIO_PORT    GPIOD           /* 待确认 */
-#define OIL_HEATER_GPIO_PIN     GPIO_PIN_0      /* 待确认: PSD0D */
-
-/* --- 压缩机控制接口 ---
- * TODO: 确认实际控制方式 (变频器通信 / GPIO)
- */
 
 #endif /* TASK_TEMP_CTRL_H */
