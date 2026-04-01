@@ -56,9 +56,12 @@ co2_vet6_base\task_rs485_log.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ha
 co2_vet6_base\task_rs485_log.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 co2_vet6_base\task_rs485_log.o: ..\Config\sys_config.h
 co2_vet6_base\task_rs485_log.o: ..\BSP\bsp_rs485.h
+co2_vet6_base\task_rs485_log.o: ..\BSP\HTC2K\bsp_htc_2k.h
+co2_vet6_base\task_rs485_log.o: ..\BSP\bsp_relay.h
 co2_vet6_base\task_rs485_log.o: ..\Config\sys_state.h
 co2_vet6_base\task_rs485_log.o: D:\MDK534\ARM\ARMCC\Bin\..\include\stdbool.h
 co2_vet6_base\task_rs485_log.o: ../Core/Inc/rtc.h
 co2_vet6_base\task_rs485_log.o: ..\APP\task_adc.h
 co2_vet6_base\task_rs485_log.o: D:\MDK534\ARM\ARMCC\Bin\..\include\stdio.h
 co2_vet6_base\task_rs485_log.o: D:\MDK534\ARM\ARMCC\Bin\..\include\string.h
+co2_vet6_base\task_rs485_log.o: D:\MDK534\ARM\ARMCC\Bin\..\include\stdlib.h

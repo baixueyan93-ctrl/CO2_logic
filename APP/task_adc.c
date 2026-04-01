@@ -132,10 +132,11 @@ static float co2_pressure_to_sat_temp(float pressure_bar)
  * 线性关系: P = (V_sensor - V_ZERO) / (V_FULL - V_ZERO) × P_MAX
  * ========================================================== */
 
-/* 分压电阻参数 */
-#define PRES_R_UPPER        5100.0f     /* 上臂电阻 5.1kΩ */
+
+/* 分压电阻参数 (实测校准: 2.2kΩ / 3.3kΩ) */
+#define PRES_R_UPPER        2200.0f     /* 上臂电阻 2.2kΩ */
 #define PRES_R_LOWER        3300.0f     /* 下臂电阻 3.3kΩ */
-#define PRES_DIV_RATIO      (PRES_R_LOWER / (PRES_R_UPPER + PRES_R_LOWER))  /* 0.3929 */
+#define PRES_DIV_RATIO      (PRES_R_LOWER / (PRES_R_UPPER + PRES_R_LOWER))  /* 0.6 */
 
 /* 传感器通用参数 */
 #define PRES_V_ZERO         0.5f        /* 零压力输出电压 (V) */

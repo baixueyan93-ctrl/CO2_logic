@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;  ../Drivers/STM32F4xx_HAL_Driver/Inc;  ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;  ../Middlewares/Third_Party/FreeRTOS/Source/include;  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;  ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;  ../Drivers/CMSIS/Device/ST/STM32F4xx/Include;  ../Drivers/CMSIS/Include;  ..\APP;  ..\BSP;  ..\Config;  ..\BSP\HTC2K</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;..\APP;..\BSP;..\Config;..\BSP\HTC2K</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -1331,6 +1331,36 @@
               <FileType>1</FileType>
               <FilePath>..\APP\task_exv.c</FilePath>
             </File>
+            <File>
+              <FileName>task_cond_fan.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APP\task_cond_fan.c</FilePath>
+            </File>
+            <File>
+              <FileName>task_defrost.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APP\task_defrost.c</FilePath>
+            </File>
+            <File>
+              <FileName>task_evap_fan.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APP\task_evap_fan.c</FilePath>
+            </File>
+            <File>
+              <FileName>task_freq_exv.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APP\task_freq_exv.c</FilePath>
+            </File>
+            <File>
+              <FileName>task_temp_ctrl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APP\task_temp_ctrl.c</FilePath>
+            </File>
+            <File>
+              <FileName>task_timer_svc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APP\task_timer_svc.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1370,6 +1400,11 @@
               <FileName>bsp_exv.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\BSP\bsp_exv.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_relay.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\bsp_relay.c</FilePath>
             </File>
           </Files>
         </Group>

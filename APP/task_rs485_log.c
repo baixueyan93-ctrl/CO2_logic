@@ -133,6 +133,11 @@ void Task_RS485Log_Process(void const *argument) {
             current_data.VAR_SUCTION_TEMP, current_data.VAR_COND_TEMP,
             current_data.VAR_SUPERHEAT);
     BSP_RS485_SendString(msg);
+		
+    /* ±¨¾¯±êÖ¾ºÍÍ¼±êµ÷ÊÔ */
+    sprintf(msg, "ALARM: 0x%08lX  ICON0:0x%02X  ICON1:0x%02X\r\n",
+            (unsigned long)g_AlarmFlags, g_IconSet.byte, g_IconSet1.byte);
+    BSP_RS485_SendString(msg);
 
     BSP_RS485_SendString("=======================\r\n");
 }
@@ -259,11 +264,11 @@ void Task_RS485Log_Process(void const *argument) {
                     while (*p == ' ') p++;
                     if (strncmp(p, "ON", 2) == 0) {
                         BSP_Relay_On((Relay_ID)id);
-                        sprintf(rmsg, "%s(K%d) â†’ ON\r\n", BSP_Relay_Name((Relay_ID)id), id);
+                        sprintf(rmsg, "%s(K%d) -> ON\r\n", BSP_Relay_Name((Relay_ID)id), id);
                         BSP_RS485_SendString(rmsg);
                     } else if (strncmp(p, "OFF", 3) == 0) {
                         BSP_Relay_Off((Relay_ID)id);
-                        sprintf(rmsg, "%s(K%d) â†’ OFF\r\n", BSP_Relay_Name((Relay_ID)id), id);
+                        sprintf(rmsg, "%s(K%d) -> OFF\r\n", BSP_Relay_Name((Relay_ID)id), id);
                         BSP_RS485_SendString(rmsg);
                     } else {
                         /* æŸ¥è¯¢å•ä¸ª */

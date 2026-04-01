@@ -11,6 +11,8 @@ co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/
 co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
 co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
 co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h
+co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h
+co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h
 co2_vet6_base\task_panel.o: ..\BSP\HTC2K\bsp_htc_2k.h
 co2_vet6_base\task_panel.o: ../Core/Inc/main.h
 co2_vet6_base\task_panel.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h
@@ -50,8 +52,6 @@ co2_vet6_base\task_panel.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_ti
 co2_vet6_base\task_panel.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 co2_vet6_base\task_panel.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 co2_vet6_base\task_panel.o: ..\Config\sys_state.h
-co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h
-co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h
 co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h
 co2_vet6_base\task_panel.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
 co2_vet6_base\task_panel.o: D:\MDK534\ARM\ARMCC\Bin\..\include\stdbool.h
