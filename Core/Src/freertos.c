@@ -114,6 +114,15 @@ void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer, StackTy
 }
 /* USER CODE END GET_IDLE_TASK_MEMORY */
 
+/* 栈溢出回调: 某任务栈溢出时进入这里, 死循环方便调试定位 */
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    (void)xTask;
+    (void)pcTaskName;
+    /* 死循环, 用调试器可以看到 pcTaskName 知道是哪个任务溢出 */
+    for (;;) {}
+}
+
 /**
   * @brief  FreeRTOS initialization
   * @param  None
