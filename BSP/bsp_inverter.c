@@ -60,8 +60,6 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
  *********************************************************************************/
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    uint8_t i = 0;
-
     if (huart->Instance == UART4)
     {
         if (InvRxBuf[0] == 0x55)
