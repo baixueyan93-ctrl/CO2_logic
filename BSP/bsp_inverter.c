@@ -60,30 +60,15 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
  *********************************************************************************/
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    uint8_t i = 0;
-
     if (huart->Instance == UART4)
     {
-        if (InvRxBuf[0] == 0x55)
+        if (InvRxBuf[0] == 0x55 && InvRxBuf[15] == 0x56)
         {
-            if (InvRxBuf[15] == 0x56)
-            {
-                InvAckOK = 1;                          /* 首尾正确, 通信成功 */
-            }
-            else
-            {
-                InvAckOK = 0;
-                HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_SET);
-                HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, 16, 1000);   /* 帧尾错, 重发原始帧 */
-                HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
-            }
+            InvAckOK = 1;    /* 首尾正确, 通信成功 */
         }
         else
         {
-            InvAckOK = 0;
-            HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_SET);
-            HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, 16, 1000);       /* 帧头错, 重发原始帧 */
-            HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
+            InvAckOK = 0;    /* 帧错误, 标记失败, 不在中断里重发 */
         }
 
         HAL_UART_Receive_IT(&huart4, InvRxBuf, 16);

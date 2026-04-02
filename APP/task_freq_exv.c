@@ -7,7 +7,9 @@
 #include "sys_config.h"
 #include "bsp_exv.h"
 #include "bsp_inverter.h"
+#include "bsp_rs485.h"
 #include "task_panel.h"
+#include <stdio.h>
 #include <stdbool.h>
 #include <math.h>
 
@@ -72,6 +74,13 @@ static void PID_SetFreq(float freq_hz)
 
     /* 发送调频指令给变频板 */
     BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
+
+    /* 通过调试串口打印当前频率, 方便电脑读取 */
+    {
+        char freq_msg[64];
+        sprintf(freq_msg, "[PID] FREQ:%dHz\r\n", (int)freq_hz);
+        BSP_RS485_SendString(freq_msg);
+    }
 }
 
 /* --- 设置膨胀阀开度 (含上下限保护) --- */
@@ -101,6 +110,7 @@ static void PID_StopCompressor(void)
 {
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
     BSP_Inverter_Send(0x00, 0);
+    BSP_RS485_SendString("[PID] COMP STOP\r\n");
 }
 
 

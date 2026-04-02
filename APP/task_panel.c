@@ -5,7 +5,11 @@
 #include "bsp_htc_2k.h"
 #include "bsp_relay.h"
 #include "bsp_inverter.h"
+#include "bsp_rs485.h"
+#include "bsp_eeprom.h"
+#include <stdio.h>
 #include "sys_state.h"
+#include <string.h>
 #include "sys_config.h"
 #include <stdbool.h>
 
@@ -19,6 +23,35 @@ bool    g_system_on  = true;    /* 系统电源状态 */
 
 static uint32_t s_set_mode_tick = 0;
 #define SET_MODE_TIMEOUT_MS  5000   /* 5秒无操作自动退出设置模式 */
+
+/* EEPROM 存储设定温度 */
+#define EEPROM_ADDR_SET_TEMP   0x0008   /* 存放地址 (0x0000被日志索引占用) */
+#define EEPROM_TEMP_MAGIC      0xA5     /* 校验字节, 防止首次上电读到垃圾值 */
+
+/* 从EEPROM读取上次设定温度 */
+static void Panel_LoadSetTemp(void)
+{
+    uint8_t buf[5];  /* 1字节校验 + 4字节float */
+    BSP_EEPROM_Read(EEPROM_ADDR_SET_TEMP, buf, 5);
+
+    if (buf[0] == EEPROM_TEMP_MAGIC) {
+        float temp;
+        memcpy(&temp, &buf[1], 4);
+        if (temp >= -50.0f && temp <= 50.0f) {
+            g_set_temp = temp;
+        }
+    }
+    /* 校验不通过则保持默认值 SET_TEMP_TS */
+}
+
+/* 保存设定温度到EEPROM */
+static void Panel_SaveSetTemp(void)
+{
+    uint8_t buf[5];
+    buf[0] = EEPROM_TEMP_MAGIC;
+    memcpy(&buf[1], &g_set_temp, 4);
+    BSP_EEPROM_Write(EEPROM_ADDR_SET_TEMP, buf, 5);
+}
 
 /* ===========================================================================
  * 双面板任务
@@ -39,7 +72,8 @@ void Task_Panel_Process(void const *argument)
     HTC2K_Init1();  /* PANEL1 (PB4/PB5) */
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    /* g_set_temp 已在全局初始化为 SET_TEMP_TS (-10℃) */
+    /* 从EEPROM读取上次设定温度, 读不到则保持默认 SET_TEMP_TS */
+    Panel_LoadSetTemp();
 
     for (;;) {
         /* 读取系统状态 */
@@ -51,7 +85,6 @@ void Task_Panel_Process(void const *argument)
         /* ============================================
          * 构建统一图标 (两块屏共用)
          * ============================================ */
-        uint8_t icons = 0;
         icon_type_t icon_common;
         icon_common.byte = 0;
 
@@ -78,9 +111,9 @@ void Task_Panel_Process(void const *argument)
          * 显示温度 (两块屏内容相同)
          * ============================================ */
         if (g_panel_mode == 0) {
-            /* 正常模式: 显示 SHT-30 环境温度 */
-            HTC2K_ShowTemp(sensor.VAR_SHT30_TEMP);
-            HTC2K_ShowTemp1(sensor.VAR_SHT30_TEMP);
+            /* 正常模式: 显示 NTC 柜温 */
+            HTC2K_ShowTemp(sensor.VAR_CABINET_TEMP);
+            HTC2K_ShowTemp1(sensor.VAR_CABINET_TEMP);
         } else {
             /* 设置模式: 显示设定温度 */
             HTC2K_ShowTemp(g_set_temp);
@@ -97,6 +130,7 @@ void Task_Panel_Process(void const *argument)
                 /* 复位: 退出设置模式, 恢复默认温度 */
                 g_panel_mode = 0;
                 g_set_temp = SET_TEMP_TS;  /* 恢复默认温度 */
+                Panel_SaveSetTemp();       /* 保存到EEPROM */
             }
             else if (key0 == KEY_CODE_SET) {
                 /* 切换设置模式 */
@@ -107,8 +141,9 @@ void Task_Panel_Process(void const *argument)
                 /* 设置模式下: 上/下调温 */
                 if (key0 == KEY_CODE_UP)   { g_set_temp += 0.5f; s_set_mode_tick = xTaskGetTickCount(); }
                 if (key0 == KEY_CODE_DOWN) { g_set_temp -= 0.5f; s_set_mode_tick = xTaskGetTickCount(); }
-                if (g_set_temp > 20.0f)  g_set_temp = 20.0f;
-                if (g_set_temp < -30.0f) g_set_temp = -30.0f;
+                if (g_set_temp > 50.0f)  g_set_temp = 50.0f;
+                if (g_set_temp < -50.0f) g_set_temp = -50.0f;
+                Panel_SaveSetTemp();  /* 每次调温后保存到EEPROM */
             }
             else {
                 /* 正常模式下: 上/下调频率并发送 (用于调试) */
@@ -118,6 +153,11 @@ void Task_Panel_Process(void const *argument)
                 if (s_test_freq > INV_FREQ_MAX) s_test_freq = INV_FREQ_MAX;
                 if (s_test_freq < INV_FREQ_MIN) s_test_freq = INV_FREQ_MIN;
                 BSP_Inverter_Send(0x02, s_test_freq);
+                {
+                    char fm[64];
+                    sprintf(fm, "[KEY] FREQ:%dHz\r\n", s_test_freq);
+                    BSP_RS485_SendString(fm);
+                }
             }
             vTaskDelay(pdMS_TO_TICKS(150));  /* 消抖 */
         }
@@ -151,8 +191,10 @@ void Task_Panel_Process(void const *argument)
                 if (g_system_on) {
                     xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
                     BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);  /* 开机, 初始频率80Hz */
+                    BSP_RS485_SendString("[KEY] COMP START 80Hz\r\n");
                 } else {
                     BSP_Inverter_Send(0x00, 0);                         /* 关机 */
+                    BSP_RS485_SendString("[KEY] COMP STOP\r\n");
                     xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
                     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
                 }
@@ -164,6 +206,7 @@ void Task_Panel_Process(void const *argument)
         if (g_panel_mode == 1) {
             if ((xTaskGetTickCount() - s_set_mode_tick) > pdMS_TO_TICKS(SET_MODE_TIMEOUT_MS)) {
                 g_panel_mode = 0;
+                Panel_SaveSetTemp();  /* 超时退出时也保存 */
             }
         }
 
