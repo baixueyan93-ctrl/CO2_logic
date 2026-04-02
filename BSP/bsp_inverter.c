@@ -18,9 +18,6 @@ void BSP_Inverter_Init(void)
     /* RS485 默认为接收模式 */
     HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
 
-    /* 开机自动发一帧测试数据, 电脑串口助手能看到就说明通信OK */
-    BSP_Inverter_Send(0x01, 80);
-
     /* 启动中断接收, 等待回传16字节 */
     HAL_UART_Receive_IT(&huart4, InvRxBuf, INV_FRAME_LEN);
 }
