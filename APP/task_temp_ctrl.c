@@ -7,8 +7,10 @@
 #include "sys_config.h"
 #include "bsp_relay.h"
 #include "bsp_inverter.h"
+#include "bsp_rs485.h"
 #include "task_panel.h"
 #include <stdbool.h>
+#include <stdio.h>
 
 /* ===========================================================================
  * 温度控制流程 (逻辑图1) — 实现文件
@@ -43,6 +45,7 @@ static void Compressor_Start(void)
 {
     BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
     xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
+    BSP_RS485_SendString("[COMP] START 80Hz\r\n");
 }
 
 /* --- 压缩机停止 --- */
@@ -50,6 +53,7 @@ static void Compressor_Stop(void)
 {
     BSP_Inverter_Send(0x00, 0);
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
+    BSP_RS485_SendString("[COMP] STOP\r\n");
 }
 
 /* --- 设置压缩机频率 --- */
@@ -63,6 +67,12 @@ static void Compressor_SetFreq(float freq_hz)
     SysState_Unlock();
 
     BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
+
+    {
+        char msg[48];
+        sprintf(msg, "[COMP] FREQ:%dHz\r\n", (int)freq_hz);
+        BSP_RS485_SendString(msg);
+    }
 }
 
 /* --- 读取VAC相序状态 (接口待确认) ---
