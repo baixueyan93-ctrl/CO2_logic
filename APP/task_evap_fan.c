@@ -293,45 +293,41 @@ void EvapFan_ModeF4(void)
     bool fan_running = (sys_bits & ST_EVAP_FAN_ON) != 0;
 
     /* ================================================================
-     *  第1步: 读取蒸发温度, 判断是否合格
+     *  第1步: 读取柜温(SHT30), 与面板设定温度比较
+     *
+     *  回差控制:
+     *    柜温 ≤ 设定温度 - 2℃  → 关风机 (温度够低了)
+     *    柜温 ≥ 设定温度        → 开风机 (温度回升了)
+     *    中间区域               → 保持当前状态 (防抖)
      * ================================================================ */
     SysVarData_t sensor;
     SysState_GetSensor(&sensor);
 
-    /* 蒸发温度合格判定:
-     *   蒸发器温度 <= 合格阈值 (-15℃) 时为合格
-     *   即蒸发器已充分制冷, 可以送风
-     */
-    bool temp_qualified = (sensor.VAR_EVAP_TEMP <= SET_EVAP_TEMP_OK);
-
-    /* 同步更新温度合格状态标志 */
-    if (temp_qualified) {
-        xEventGroupSetBits(SysEventGroup, ST_EVAP_TEMP_QUAL);
-    } else {
-        xEventGroupClearBits(SysEventGroup, ST_EVAP_TEMP_QUAL);
-    }
+    extern float g_set_temp;
+    float cabinet_temp = sensor.VAR_SHT30_TEMP;   /* SHT30 柜温 */
+    float temp_off = g_set_temp - 2.0f;           /* 关风机阈值 */
+    float temp_on  = g_set_temp;                   /* 开风机阈值 */
 
     /* ================================================================
-     *  第2步: 蒸发温度合格?
+     *  第2步: 回差判断
      * ================================================================ */
-    if (temp_qualified) {
-        /* ---- Y → 蒸发温度合格, 风机应该运行 ---- */
-        if (!fan_running) {
-            /* 风机未运行 → 开启风机, 标记正在运行 */
-            EvapFan_On();
-            EvapFan_MarkRunning();
-        }
-        /* Y → 风机已在运行, 保持 → 结束 */
-
-    } else {
-        /* ---- N → 蒸发温度不合格, 风机应该关闭 ---- */
+    if (cabinet_temp <= temp_off) {
+        /* 柜温 ≤ 设定-2℃ → 温度够低, 关风机 */
         if (fan_running) {
-            /* 风机正在运行 → 关闭风机, 标记已停止 */
             EvapFan_Off();
             EvapFan_MarkStopped();
         }
-        /* N → 风机已关闭, 无需操作 → 结束 */
+        xEventGroupClearBits(SysEventGroup, ST_EVAP_TEMP_QUAL);
     }
+    else if (cabinet_temp >= temp_on) {
+        /* 柜温 ≥ 设定温度 → 温度回升, 开风机 */
+        if (!fan_running) {
+            EvapFan_On();
+            EvapFan_MarkRunning();
+        }
+        xEventGroupSetBits(SysEventGroup, ST_EVAP_TEMP_QUAL);
+    }
+    /* 中间区域: 保持当前状态 (回差防抖) */
 }
 
 

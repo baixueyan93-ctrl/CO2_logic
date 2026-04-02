@@ -130,30 +130,11 @@ void CondFan_MainProcess(void)
     }
 
     /* ================================================================
-     *  Y → 压缩机运行中
-     *
-     *  温度逻辑 — 1控3 回差控制:
-     *    冷凝温度 ≥ ON温度 (35℃) → 开启风机
-     *    冷凝温度 ≤ OFF温度(25℃) → 关闭风机
-     *    中间区域 → 保持当前状态 (回差防抖)
+     *  Y → 压缩机运行中 → 直接开风机
      * ================================================================ */
-    SysVarData_t sensor;
-    SysState_GetSensor(&sensor);
-
-    float cond_temp = sensor.VAR_COND_TEMP;
-
-    if (cond_temp >= SET_COND_FAN_ON_T) {
-        /* 冷凝温度 ≥ 35℃ → 开启风机散热 */
-        if (!fan_on) {
-            CondFan_On();
-        }
-    } else if (cond_temp <= SET_COND_FAN_OFF_T) {
-        /* 冷凝温度 ≤ 25℃ → 关闭风机 */
-        if (fan_on) {
-            CondFan_AllOff();
-        }
+    if (!fan_on) {
+        CondFan_On();
     }
-    /* 25~35℃ 之间保持当前状态 (回差) */
 }
 
 
