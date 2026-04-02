@@ -5,7 +5,9 @@
 #include "bsp_htc_2k.h"
 #include "bsp_relay.h"
 #include "bsp_inverter.h"
+#include "bsp_rs485.h"
 #include "bsp_eeprom.h"
+#include <stdio.h>
 #include "sys_state.h"
 #include <string.h>
 #include "sys_config.h"
@@ -151,6 +153,11 @@ void Task_Panel_Process(void const *argument)
                 if (s_test_freq > INV_FREQ_MAX) s_test_freq = INV_FREQ_MAX;
                 if (s_test_freq < INV_FREQ_MIN) s_test_freq = INV_FREQ_MIN;
                 BSP_Inverter_Send(0x02, s_test_freq);
+                {
+                    char fm[64];
+                    sprintf(fm, "[KEY] FREQ:%dHz\r\n", s_test_freq);
+                    BSP_RS485_SendString(fm);
+                }
             }
             vTaskDelay(pdMS_TO_TICKS(150));  /* 消抖 */
         }
@@ -184,8 +191,10 @@ void Task_Panel_Process(void const *argument)
                 if (g_system_on) {
                     xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
                     BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);  /* 开机, 初始频率80Hz */
+                    BSP_RS485_SendString("[KEY] COMP START 80Hz\r\n");
                 } else {
                     BSP_Inverter_Send(0x00, 0);                         /* 关机 */
+                    BSP_RS485_SendString("[KEY] COMP STOP\r\n");
                     xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
                     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
                 }
