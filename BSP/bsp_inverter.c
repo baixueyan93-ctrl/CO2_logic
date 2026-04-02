@@ -73,18 +73,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             else
             {
                 InvAckOK = 0;
-                for (i = 0; i < 12; i++) { InvTxBuf[i] = 'U'; }
                 HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_SET);
-                HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, 12, 1000);       /* 帧尾错, 发12个U要求重发 */
+                HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, INV_FRAME_LEN, 1000);   /* 帧尾错, 重发原始帧 */
                 HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
             }
         }
         else
         {
             InvAckOK = 0;
-            for (i = 0; i < 12; i++) { InvTxBuf[i] = 'U'; }
             HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_SET);
-            HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, 12, 1000);           /* 帧头错, 发12个U要求重发 */
+            HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, INV_FRAME_LEN, 1000);       /* 帧头错, 重发原始帧 */
             HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
         }
 
