@@ -19,7 +19,7 @@ void BSP_Inverter_Init(void)
     HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
 
     /* 启动中断接收, 等待回传16字节 */
-    HAL_UART_Receive_IT(&huart4, InvRxBuf, INV_FRAME_LEN);
+    HAL_UART_Receive_IT(&huart4, InvRxBuf, 16);
 }
 
 /* ===================================================================
@@ -34,7 +34,7 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
     if (freq_hz > INV_FREQ_MAX) freq_hz = INV_FREQ_MAX;
     if (cmd != 0x00 && freq_hz < INV_FREQ_MIN) freq_hz = INV_FREQ_MIN;
 
-    for (i = 0; i < INV_FRAME_LEN; i++) { InvTxBuf[i] = 0x00; }
+    for (i = 0; i < 16; i++) { InvTxBuf[i] = 0x00; }
 
     InvTxBuf[0]  = 0x55;
     InvTxBuf[1]  = cmd;
@@ -47,7 +47,7 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
     /* RS485 切换为发送模式 */
     HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_SET);
 
-    HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, INV_FRAME_LEN, 1000);
+    HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, 16, 1000);
 
     /* 发送完毕, 切回接收模式 */
     HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
@@ -74,7 +74,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             {
                 InvAckOK = 0;
                 HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_SET);
-                HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, INV_FRAME_LEN, 1000);   /* 帧尾错, 重发原始帧 */
+                HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, 16, 1000);   /* 帧尾错, 重发原始帧 */
                 HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
             }
         }
@@ -82,11 +82,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         {
             InvAckOK = 0;
             HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_SET);
-            HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, INV_FRAME_LEN, 1000);       /* 帧头错, 重发原始帧 */
+            HAL_UART_Transmit(&huart4, (uint8_t*)InvTxBuf, 16, 1000);       /* 帧头错, 重发原始帧 */
             HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
         }
 
-        HAL_UART_Receive_IT(&huart4, InvRxBuf, INV_FRAME_LEN);
+        HAL_UART_Receive_IT(&huart4, InvRxBuf, 16);
     }
     else if (huart->Instance == USART1)
     {
