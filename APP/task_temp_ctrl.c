@@ -243,9 +243,9 @@ void TempCtrl_CompressorStart(void)
         return;
     }
 
-    /* ---- 第1步: 开启压缩机, 设定初始频率 F=125Hz ---- */
+    /* ---- 第1步: 开启压缩机, 设定初始频率 F=80Hz ---- */
     Compressor_Start();
-    Compressor_SetFreq(SET_FREQ_INIT);  /* F = 125Hz */
+    Compressor_SetFreq(SET_FREQ_INIT);  /* F = 80Hz (SET_FREQ_INIT) */
 
     /* ---- 第2步: 启动热车计时器 C20 ----
      * 热车计时由定时中断服务(逻辑图5)中的1s定时器驱动:
@@ -417,7 +417,8 @@ void TempCtrl_AlarmProcess(void)
         /* Y → WPH1 置位: 排压超限 */
         g_AlarmFlags |= WARN_PRES_HIGH;
 
-        /* 高压超时? — TMR_PRES_HIGH_CNT 由定时中断每秒递增 */
+        /* 高压超时? — 每秒递增一次, 持续超限才触发超时报警 */
+        g_TimerData.TMR_PRES_HIGH_CNT++;
         if (g_TimerData.TMR_PRES_HIGH_CNT >= SET_WARN_PRES_TMO) {
             /* Y → WPH2 置位: 高压持续超时 */
             g_AlarmFlags |= WARN_PRES_HIGH_TMO;
@@ -444,7 +445,8 @@ void TempCtrl_AlarmProcess(void)
         /* Y → WPL1 置位: 吸压过低 */
         g_AlarmFlags |= WARN_PRES_LOW;
 
-        /* 低压超时? — TMR_PRES_LOW_CNT 由定时中断每秒递增 */
+        /* 低压超时? — 每秒递增一次, 持续超限才触发超时报警 */
+        g_TimerData.TMR_PRES_LOW_CNT++;
         if (g_TimerData.TMR_PRES_LOW_CNT >= SET_WARN_PRES_TMO) {
             /* Y → WPL2 置位: 低压持续超时 */
             g_AlarmFlags |= WARN_PRES_LOW_TMO;
