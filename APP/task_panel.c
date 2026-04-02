@@ -5,7 +5,9 @@
 #include "bsp_htc_2k.h"
 #include "bsp_relay.h"
 #include "bsp_inverter.h"
+#include "bsp_eeprom.h"
 #include "sys_state.h"
+#include <string.h>
 #include "sys_config.h"
 #include <stdbool.h>
 
@@ -19,6 +21,35 @@ bool    g_system_on  = true;    /* 系统电源状态 */
 
 static uint32_t s_set_mode_tick = 0;
 #define SET_MODE_TIMEOUT_MS  5000   /* 5秒无操作自动退出设置模式 */
+
+/* EEPROM 存储设定温度 */
+#define EEPROM_ADDR_SET_TEMP   0x0000   /* 存放地址 */
+#define EEPROM_TEMP_MAGIC      0xA5     /* 校验字节, 防止首次上电读到垃圾值 */
+
+/* 从EEPROM读取上次设定温度 */
+static void Panel_LoadSetTemp(void)
+{
+    uint8_t buf[5];  /* 1字节校验 + 4字节float */
+    BSP_EEPROM_Read(EEPROM_ADDR_SET_TEMP, buf, 5);
+
+    if (buf[0] == EEPROM_TEMP_MAGIC) {
+        float temp;
+        memcpy(&temp, &buf[1], 4);
+        if (temp >= -50.0f && temp <= 50.0f) {
+            g_set_temp = temp;
+        }
+    }
+    /* 校验不通过则保持默认值 SET_TEMP_TS */
+}
+
+/* 保存设定温度到EEPROM */
+static void Panel_SaveSetTemp(void)
+{
+    uint8_t buf[5];
+    buf[0] = EEPROM_TEMP_MAGIC;
+    memcpy(&buf[1], &g_set_temp, 4);
+    BSP_EEPROM_Write(EEPROM_ADDR_SET_TEMP, buf, 5);
+}
 
 /* ===========================================================================
  * 双面板任务
@@ -39,7 +70,8 @@ void Task_Panel_Process(void const *argument)
     HTC2K_Init1();  /* PANEL1 (PB4/PB5) */
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    /* g_set_temp 已在全局初始化为 SET_TEMP_TS (-10℃) */
+    /* 从EEPROM读取上次设定温度, 读不到则保持默认 SET_TEMP_TS */
+    Panel_LoadSetTemp();
 
     for (;;) {
         /* 读取系统状态 */
@@ -96,6 +128,7 @@ void Task_Panel_Process(void const *argument)
                 /* 复位: 退出设置模式, 恢复默认温度 */
                 g_panel_mode = 0;
                 g_set_temp = SET_TEMP_TS;  /* 恢复默认温度 */
+                Panel_SaveSetTemp();       /* 保存到EEPROM */
             }
             else if (key0 == KEY_CODE_SET) {
                 /* 切换设置模式 */
@@ -106,8 +139,9 @@ void Task_Panel_Process(void const *argument)
                 /* 设置模式下: 上/下调温 */
                 if (key0 == KEY_CODE_UP)   { g_set_temp += 0.5f; s_set_mode_tick = xTaskGetTickCount(); }
                 if (key0 == KEY_CODE_DOWN) { g_set_temp -= 0.5f; s_set_mode_tick = xTaskGetTickCount(); }
-                if (g_set_temp > 20.0f)  g_set_temp = 20.0f;
-                if (g_set_temp < -30.0f) g_set_temp = -30.0f;
+                if (g_set_temp > 50.0f)  g_set_temp = 50.0f;
+                if (g_set_temp < -50.0f) g_set_temp = -50.0f;
+                Panel_SaveSetTemp();  /* 每次调温后保存到EEPROM */
             }
             else {
                 /* 正常模式下: 上/下调频率并发送 (用于调试) */
@@ -163,6 +197,7 @@ void Task_Panel_Process(void const *argument)
         if (g_panel_mode == 1) {
             if ((xTaskGetTickCount() - s_set_mode_tick) > pdMS_TO_TICKS(SET_MODE_TIMEOUT_MS)) {
                 g_panel_mode = 0;
+                Panel_SaveSetTemp();  /* 超时退出时也保存 */
             }
         }
 
