@@ -23,7 +23,7 @@ static uint32_t s_set_mode_tick = 0;
 #define SET_MODE_TIMEOUT_MS  5000   /* 5秒无操作自动退出设置模式 */
 
 /* EEPROM 存储设定温度 */
-#define EEPROM_ADDR_SET_TEMP   0x0000   /* 存放地址 */
+#define EEPROM_ADDR_SET_TEMP   0x0008   /* 存放地址 (0x0000被日志索引占用) */
 #define EEPROM_TEMP_MAGIC      0xA5     /* 校验字节, 防止首次上电读到垃圾值 */
 
 /* 从EEPROM读取上次设定温度 */
