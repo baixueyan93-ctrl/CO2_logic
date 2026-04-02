@@ -78,7 +78,7 @@ typedef struct {
 
     /* ===== SHT30 温湿度传感器 (I2C, 箱体内部) ===== */
 
-    float VAR_CABINET_TEMP;     /* 柜温/箱体温度 (°C), SHT30采集           */
+    float VAR_CABINET_TEMP;     /* 柜温 (°C), INUI2 PA1 10K NTC 采集       */
     float VAR_SHT30_TEMP;       /* SHT30 原始温度 (°C)                     */
     float VAR_SHT30_HUMI;       /* SHT30 相对湿度 (% RH)                   */
 
@@ -91,7 +91,7 @@ typedef struct {
     float VAR_SUCTION_TEMP;     /* = VAR_SAT_TEMP_LOW,  旧名: 吸气温度     */
     float VAR_COND_TEMP;        /* = VAR_SAT_TEMP_HIGH, 旧名: 冷凝温度     */
     float VAR_EVAP_TEMP;        /* = VAR_EVAP_IN_TEMP,  旧名: 蒸发温度     */
-    float VAR_AMBIENT_TEMP;     /* 环境温度 (°C), 预留                     */
+    float VAR_AMBIENT_TEMP;     /* 环境温度 (°C), SHT30采集, 油壳加热用    */
     float VAR_HT_DIFF;          /* 高低温差 (°C), 预留                     */
 } SysVarData_t;
 

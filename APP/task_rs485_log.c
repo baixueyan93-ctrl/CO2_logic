@@ -90,7 +90,7 @@ void Task_RS485Log_Process(void const *argument) {
 
     BSP_RS485_SendString("\r\n===== SENSOR DATA =====\r\n");
 
-    /* 5路NTC温度 — 按CO2循环顺序显示 */
+    /* 6路NTC温度 — 按CO2循环顺序显示 */
     sprintf(msg, "CompOut(INUI5):%.1fC  GCout(INUI6):%.1fC\r\n",
             current_data.VAR_COMP_OUT_TEMP, current_data.VAR_GC_OUT_TEMP);
     BSP_RS485_SendString(msg);
@@ -98,10 +98,13 @@ void Task_RS485Log_Process(void const *argument) {
             current_data.VAR_EVAP_IN_TEMP, current_data.VAR_EVAP_OUT_TEMP,
             current_data.VAR_COMP_IN_TEMP);
     BSP_RS485_SendString(msg);
+    sprintf(msg, "Cabinet(INUI2):%.1fC\r\n",
+            current_data.VAR_CABINET_TEMP);
+    BSP_RS485_SendString(msg);
 
-    /* SHT30 箱体温度 */
-    sprintf(msg, "Cabinet(SHT30):%.1fC  Humi:%.1f%%RH\r\n",
-            current_data.VAR_CABINET_TEMP, current_data.VAR_SHT30_HUMI);
+    /* SHT30 环境温度 */
+    sprintf(msg, "Ambient(SHT30):%.1fC  Humi:%.1f%%RH\r\n",
+            current_data.VAR_AMBIENT_TEMP, current_data.VAR_SHT30_HUMI);
     BSP_RS485_SendString(msg);
 
     /* 压力传感器 */

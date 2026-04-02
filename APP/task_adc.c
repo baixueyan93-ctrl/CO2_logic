@@ -9,21 +9,23 @@
 extern ADC_HandleTypeDef hadc1;
 
 /* DMA 缓冲区, 按 Rank 顺序:
- *   [0] = INUI4    PC3  CH13  10K NTC
- *   [1] = INUI5    PC2  CH12  50K NTC
- *   [2] = INUI0    PA3  CH3   10K NTC
- *   [3] = INUI1    PA2  CH2   10K NTC
- *   [4] = INUI6    PC1  CH11  50K NTC
+ *   [0] = INUI4    PC3  CH13  10K NTC  压缩机进口
+ *   [1] = INUI5    PC2  CH12  50K NTC  压缩机出口/气冷器进口
+ *   [2] = INUI0    PA3  CH3   10K NTC  蒸发器进口
+ *   [3] = INUI1    PA2  CH2   10K NTC  蒸发器出口
+ *   [4] = INUI6    PC1  CH11  50K NTC  气冷器出口
  *   [5] = AN5VIN0  PA7  CH7   Low pressure  (SANHUA YCQB09L02, 0~9MPa)
  *   [6] = AN5VIN1  PC4  CH14  High pressure (SANHUA YCQB15L01, 0~15MPa)
+ *   [7] = INUI2    PA1  CH1   10K NTC  柜温 (新增)
  */
-volatile uint16_t adc_buffer[7] = {0};
+volatile uint16_t adc_buffer[8] = {0};
 
 float g_temp_inui4_10k = 0.0f;
 float g_temp_inui5_50k = 0.0f;
 float g_temp_inui0_10k = 0.0f;
 float g_temp_inui1_10k = 0.0f;
 float g_temp_inui6_50k = 0.0f;
+float g_temp_inui2_10k = 0.0f;
 float g_pres_low  = 0.0f;
 float g_pres_high = 0.0f;
 
@@ -184,7 +186,7 @@ static float adc_to_pressure(uint16_t adc_value, float v_full, float p_max_bar)
  *   SHT30      → 箱体/柜温 (由task_sht30写入)
  * ========================================================== */
 void Task_ADC_Process(void const *argument) {
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, 7);
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, 8);
     vTaskDelay(pdMS_TO_TICKS(500));
 
     for(;;) {
@@ -194,6 +196,7 @@ void Task_ADC_Process(void const *argument) {
         int16_t t_inui0 = adc_to_temperature_10k(adc_buffer[2]);  /* INUI0 PA3 10K 蒸发器进口 */
         int16_t t_inui1 = adc_to_temperature_10k(adc_buffer[3]);  /* INUI1 PA2 10K 蒸发器出口 */
         int16_t t_inui6 = adc_to_temperature_50k(adc_buffer[4]);  /* INUI6 PC1 50K 气冷器出口 */
+        int16_t t_inui2 = adc_to_temperature_10k(adc_buffer[7]);  /* INUI2 PA1 10K 柜温 */
 
         /* 2. 转换2路压力传感器 */
         float pres_l = adc_to_pressure(adc_buffer[5],
@@ -216,6 +219,7 @@ void Task_ADC_Process(void const *argument) {
         g_temp_inui0_10k = t_inui0 / 10.0f;  /* 蒸发器进口 */
         g_temp_inui1_10k = t_inui1 / 10.0f;  /* 蒸发器出口 */
         g_temp_inui6_50k = t_inui6 / 10.0f;  /* 气冷器出口 */
+        g_temp_inui2_10k = t_inui2 / 10.0f;  /* 柜温 (NTC) */
         g_pres_low  = pres_l;
         g_pres_high = pres_h;
 
@@ -223,12 +227,13 @@ void Task_ADC_Process(void const *argument) {
         SysState_Lock();
         SysVarData_t *p = SysState_GetRawPtr();
 
-        /* --- 5路NTC → 新字段 (按循环位置) --- */
+        /* --- 6路NTC → 新字段 (按循环位置) --- */
         p->VAR_COMP_OUT_TEMP  = g_temp_inui5_50k;  /* INUI5 压缩机出口/气冷器进口 */
         p->VAR_GC_OUT_TEMP    = g_temp_inui6_50k;  /* INUI6 气体冷却器出口 */
         p->VAR_EVAP_IN_TEMP   = g_temp_inui0_10k;  /* INUI0 蒸发器进口 */
         p->VAR_EVAP_OUT_TEMP  = g_temp_inui1_10k;  /* INUI1 蒸发器出口 */
         p->VAR_COMP_IN_TEMP   = g_temp_inui4_10k;  /* INUI4 压缩机进口 */
+        p->VAR_CABINET_TEMP   = g_temp_inui2_10k;  /* INUI2 柜温 (NTC) */
 
         /* --- 压力 --- */
         p->VAR_SUCTION_PRES   = pres_l;             /* 低压 (压缩机进口侧) */
@@ -241,11 +246,11 @@ void Task_ADC_Process(void const *argument) {
         /* --- 计算量 --- */
         p->VAR_SUPERHEAT      = superheat;           /* 过热度 */
 
-        /* --- 兼容旧字段 (逻辑任务启用后逐步淘汰) --- */
-        p->VAR_EXHAUST_TEMP   = g_temp_inui5_50k;   /* 旧名=排气温度 */
-        p->VAR_SUCTION_TEMP   = sat_temp_low;        /* 旧名=吸气温度(实为饱和温度) */
-        p->VAR_COND_TEMP      = sat_temp_high;       /* 旧名=冷凝温度(实为饱和温度) */
-        p->VAR_EVAP_TEMP      = g_temp_inui0_10k;   /* 旧名=蒸发温度 */
+        /* --- 兼容旧字段 --- */
+        p->VAR_EXHAUST_TEMP   = g_temp_inui5_50k;   /* 排气温度 */
+        p->VAR_SUCTION_TEMP   = sat_temp_low;        /* 吸气温度(饱和温度) */
+        p->VAR_COND_TEMP      = sat_temp_high;       /* 冷凝温度(饱和温度) */
+        p->VAR_EVAP_TEMP      = g_temp_inui0_10k;   /* 蒸发温度 */
 
         SysState_Unlock();
 

@@ -109,9 +109,9 @@ void Task_Panel_Process(void const *argument)
          * 显示温度 (两块屏内容相同)
          * ============================================ */
         if (g_panel_mode == 0) {
-            /* 正常模式: 显示 SHT-30 环境温度 */
-            HTC2K_ShowTemp(sensor.VAR_SHT30_TEMP);
-            HTC2K_ShowTemp1(sensor.VAR_SHT30_TEMP);
+            /* 正常模式: 显示 NTC 柜温 */
+            HTC2K_ShowTemp(sensor.VAR_CABINET_TEMP);
+            HTC2K_ShowTemp1(sensor.VAR_CABINET_TEMP);
         } else {
             /* 设置模式: 显示设定温度 */
             HTC2K_ShowTemp(g_set_temp);

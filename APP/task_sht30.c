@@ -22,7 +22,7 @@ void Task_SHT30_Process(void const *argument) {
             SysState_Lock();
             SysState_GetRawPtr()->VAR_SHT30_TEMP = sht30_data.temperature;
             SysState_GetRawPtr()->VAR_SHT30_HUMI = sht30_data.humidity;
-            SysState_GetRawPtr()->VAR_CABINET_TEMP = sht30_data.temperature; /* 柜温 = SHT30 */
+            SysState_GetRawPtr()->VAR_AMBIENT_TEMP = sht30_data.temperature; /* 环境温度 = SHT30 */
             SysState_Unlock();
         }
 

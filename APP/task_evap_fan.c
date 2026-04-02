@@ -304,7 +304,7 @@ void EvapFan_ModeF4(void)
     SysState_GetSensor(&sensor);
 
     extern float g_set_temp;
-    float cabinet_temp = sensor.VAR_SHT30_TEMP;   /* SHT30 柜温 */
+    float cabinet_temp = sensor.VAR_CABINET_TEMP;  /* INUI2 NTC 柜温 */
     float temp_off = g_set_temp - 2.0f;           /* 关风机阈值 */
     float temp_on  = g_set_temp;                   /* 开风机阈值 */
 

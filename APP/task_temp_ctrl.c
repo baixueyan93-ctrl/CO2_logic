@@ -727,12 +727,17 @@ void TempCtrl_OilHeatControl(void)
         return;
     }
 
-    /* ---- 压缩机未运行 → 判断环境温度 ---- */
+    /* ---- 压缩机未运行 → 判断环境温度 (SHT30) ---- */
     SysVarData_t sensor;
     SysState_GetSensor(&sensor);
 
-    /* TODO: 油壳加热暂时关闭, 等确认环境温度传感器后再启用 */
-    OilHeater_Off();
+    if (sensor.VAR_AMBIENT_TEMP <= SET_OIL_HEAT_TEMP) {
+        /* 环境温度 ≤ 10℃ → 开启油壳加热 */
+        OilHeater_On();
+    } else {
+        /* 环境温度 > 10℃ → 关闭油壳加热 */
+        OilHeater_Off();
+    }
 }
 
 
