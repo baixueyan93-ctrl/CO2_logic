@@ -99,7 +99,6 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   BSP_Inverter_Init();
-  HAL_UART_Receive_IT(&huart1, InvRxBuf, INV_FRAME_LEN);
   /* USER CODE END 2 */
 
   /* Call init function for freertos objects (in freertos.c) */

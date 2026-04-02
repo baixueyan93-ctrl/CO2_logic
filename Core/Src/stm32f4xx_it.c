@@ -66,7 +66,7 @@ extern TIM_HandleTypeDef htim6;
 /* USER CODE BEGIN EV */
 extern uint8_t rx_buffer[128];             // <--- ������һ�䣬���������
 extern osMessageQId ModbusRxQueueHandle;   // <--- ������һ�䣬�����������
-extern UART_HandleTypeDef huart1;          /* 变频器 USART1 */
+extern UART_HandleTypeDef huart1;          /* RS485调试 USART1 */
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -239,7 +239,7 @@ void DMA2_Stream0_IRQHandler(void)
 /* USER CODE BEGIN 1 */
 
 /**
-  * @brief This function handles USART1 global interrupt (变频器通信).
+  * @brief This function handles USART1 global interrupt (RS485调试串口).
   */
 void USART1_IRQHandler(void)
 {
