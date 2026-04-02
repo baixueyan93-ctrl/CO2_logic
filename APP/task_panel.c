@@ -51,7 +51,6 @@ void Task_Panel_Process(void const *argument)
         /* ============================================
          * 构建统一图标 (两块屏共用)
          * ============================================ */
-        uint8_t icons = 0;
         icon_type_t icon_common;
         icon_common.byte = 0;
 
