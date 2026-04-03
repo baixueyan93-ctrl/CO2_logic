@@ -65,44 +65,96 @@ static void Compressor_SetFreq(float freq_hz)
     BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
 }
 
-/* --- 读取VAC相序状态 (接口待确认) ---
+/* --- 读取VAC相序状态 ---
+ * 通过 A150 变频器的故障码判断:
+ *   fault_stop Bit7 = 输出缺相-30
  * 返回: true = 相序正常, false = 错相/断相
  */
 static bool VAC_PhaseOK(void)
 {
-    /* TODO: 读取VAC错/断相检测GPIO或通信接口
-     * 可能来自变频器反馈信号
-     */
-    return true;  /* 占位: 默认正常 */
+    /* A150 故障码 Bit7 = 输出缺相 */
+    if (g_InvStatus.comm_ok && (g_InvStatus.fault_stop & (1U << 7))) {
+        return false;  /* 缺相故障 */
+    }
+    return true;
 }
 
 /* --- 读取变频器过流状态 ---
+ * 通过 A150 变频器的故障码和状态字判断:
+ *   fault_stop Bit0 = 硬件过流-33
+ *   fault_stop Bit3 = PFC软件过流-37
+ *   fault_stop Bit10 = 软件过流-32
+ *   status Bit4 = 逆变过流降频状态
+ *   status Bit5 = PFC过流降频状态
  * 返回: true = 过流故障, false = 正常
  */
 static bool Inverter_IsOvercurrent(void)
 {
-    /* TODO: 从变频器读取过流状态
-     * 可能通过GPIO输入或MODBUS通信
-     */
-    return false;  /* 占位: 默认正常 */
+    if (!g_InvStatus.comm_ok) {
+        return false;  /* 通信失败时不误报 */
+    }
+    /* 检查停机级过流故障 */
+    uint16_t overcurr_mask = (1U << 0) | (1U << 3) | (1U << 10);
+    if (g_InvStatus.fault_stop & overcurr_mask) {
+        return true;
+    }
+    return false;
 }
 
 /* --- 读取变频器过热状态 ---
+ * 通过 A150 变频器的故障码和状态字判断:
+ *   fault_stop Bit1 = 逆变模块过热-50
+ *   fault_stop Bit2 = PFC模块过热-51
+ *   status Bit3 = 过热降频状态
  * 返回: true = 过热故障, false = 正常
  */
 static bool Inverter_IsOverheat(void)
 {
-    /* TODO: 从变频器读取过热状态 */
-    return false;  /* 占位: 默认正常 */
+    if (!g_InvStatus.comm_ok) {
+        return false;  /* 通信失败时不误报 */
+    }
+    /* 检查停机级过热故障 */
+    uint16_t overheat_mask = (1U << 1) | (1U << 2);
+    if (g_InvStatus.fault_stop & overheat_mask) {
+        return true;
+    }
+    return false;
 }
 
-/* --- 通知用户 (蜂鸣器 / RS485 / 面板显示) --- */
+/* --- 通知用户 (通过调试串口打印具体报警信息) --- */
 static void NotifyUser(uint32_t alarm_code)
 {
-    /* TODO: 根据告警码通知用户
-     * 可通过面板显示故障码 / 蜂鸣器报警 / RS485上报
-     */
-    (void)alarm_code;
+    char msg[128];
+
+    if (alarm_code & ERR_SENSOR_CABINET)
+        BSP_RS485_SendString("[ALARM] E1: Cabinet sensor fault!\r\n");
+    if (alarm_code & ERR_VDC_LOW)
+        BSP_RS485_SendString("[ALARM] EDC: DC voltage too low!\r\n");
+    if (alarm_code & ERR_VAC_PHASE)
+        BSP_RS485_SendString("[ALARM] EAC: Phase loss/error!\r\n");
+    if (alarm_code & ERR_INV_OVERCURR)
+        BSP_RS485_SendString("[ALARM] EFI: Inverter overcurrent!\r\n");
+    if (alarm_code & ERR_INV_OVERHEAT)
+        BSP_RS485_SendString("[ALARM] EFT: Inverter overheat!\r\n");
+    if (alarm_code & ERR_TEMP_LOW_STOP)
+        BSP_RS485_SendString("[ALARM] ETM: Freq min & temp abnormal, STOP!\r\n");
+
+    if (alarm_code & WARN_EXHAUST_HIGH)
+        BSP_RS485_SendString("[WARN] WTM: Exhaust temp too high!\r\n");
+    if (alarm_code & WARN_SUCTION_LOW)
+        BSP_RS485_SendString("[WARN] WTL: Suction temp too low!\r\n");
+    if (alarm_code & WARN_PRES_HIGH)
+        BSP_RS485_SendString("[WARN] WPH: Discharge pressure high!\r\n");
+    if (alarm_code & WARN_PRES_LOW)
+        BSP_RS485_SendString("[WARN] WPL: Suction pressure low!\r\n");
+    if (alarm_code & WARN_LONGRUN)
+        BSP_RS485_SendString("[WARN] WLC: Long run time!\r\n");
+    if (alarm_code & WARN_SUPERHEAT_LOW)
+        BSP_RS485_SendString("[WARN] EDT: Superheat too low!\r\n");
+
+    /* 打印报警码数值 */
+    sprintf(msg, "[ALARM] code=0x%08lX\r\n", (unsigned long)alarm_code);
+    BSP_RS485_SendString(msg);
 }
 
 /* --- 蒸发风扇关闭 (K1继电器, 1控2) --- */
