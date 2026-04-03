@@ -486,6 +486,8 @@ void Task_FreqExv_Process(void const *argument)
     /* 等待系统初始化完成 */
     vTaskDelay(pdMS_TO_TICKS(3000));
 
+    static uint8_t s_inv_poll_cnt = 0;  /* 变频器状态轮询计数 */
+
     for (;;) {
         /* ============================================
          * 检查PID周期是否到时 (30秒)
@@ -508,6 +510,46 @@ void Task_FreqExv_Process(void const *argument)
             /* 复位PID周期计时器, 等待下一个30秒 */
             g_TimerData.TMR_PID_CNT = 0;
             xEventGroupClearBits(SysTimerEventGroup, ST_TMR_PID_DONE);
+        }
+
+        /* ============================================
+         * 每5秒轮询一次变频器状态 (Modbus读取)
+         *   读取: 运行状态、故障码、实际转速、电流、电压等
+         *   用于: 故障检测、运行监控、调试打印
+         * ============================================ */
+        s_inv_poll_cnt++;
+        if (s_inv_poll_cnt >= 5) {
+            s_inv_poll_cnt = 0;
+
+            InvStatus_t inv_st;
+            if (BSP_Inverter_ReadStatus(&inv_st)) {
+                /* 通信成功, 检查变频器故障 */
+                if (inv_st.fault_stop != 0) {
+                    g_AlarmFlags |= ERR_INV_OVERCURR;
+                    char msg[80];
+                    sprintf(msg, "[INV] FAULT STOP: 0x%04X\r\n", inv_st.fault_stop);
+                    BSP_RS485_SendString(msg);
+                }
+                if (inv_st.fault_warn != 0) {
+                    char msg[80];
+                    sprintf(msg, "[INV] FAULT WARN: 0x%04X\r\n", inv_st.fault_warn);
+                    BSP_RS485_SendString(msg);
+                }
+                /* 调试打印: 实际转速和状态 */
+                {
+                    char msg[80];
+                    sprintf(msg, "[INV] SPD:%dHz STS:0x%04X I:%d.%dA V:%dV\r\n",
+                            inv_st.motor_speed_hz,
+                            inv_st.status,
+                            inv_st.out_current_x10 / 10,
+                            inv_st.out_current_x10 % 10,
+                            inv_st.bus_voltage);
+                    BSP_RS485_SendString(msg);
+                }
+            } else {
+                /* 通信失败, 打印提示 */
+                BSP_RS485_SendString("[INV] COMM FAIL\r\n");
+            }
         }
 
         /* 循环延时: 1秒 */
