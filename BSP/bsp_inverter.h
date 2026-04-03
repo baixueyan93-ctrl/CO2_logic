@@ -71,7 +71,7 @@
 #define INV_A150_FREQ_MAX       120     /* A150 最大频率 120Hz */
 
 /* --- 系统频率范围 (兼容旧宏, 供上层使用) --- */
-#define INV_FREQ_MIN            80      /* 系统最低频率 (Hz), 映射到 A150 的 0Hz */
+#define INV_FREQ_MIN            120     /* 系统最低频率 (Hz), 映射到 A150 的 20Hz */
 #define INV_FREQ_MAX            320     /* 系统最高频率 (Hz), 映射到 A150 的 120Hz */
 #define INV_FRAME_LEN           16      /* 兼容旧定义 */
 

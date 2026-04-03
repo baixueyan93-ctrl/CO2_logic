@@ -233,20 +233,20 @@ void BSP_Inverter_Init(void)
  *
  *  上层逻辑调用方式不变:
  *    cmd=0x00, freq=0   → 停机 (写频率0)
- *    cmd=0x01, freq=80  → 启动 (写初始频率)
+ *    cmd=0x01, freq=120 → 启动 (写初始频率)
  *    cmd=0x02, freq=xxx → 调频 (写目标频率)
  *
- *  内部将系统频率 (80~320 Hz) 映射到 A150 频率 (0~120 Hz):
+ *  内部将系统频率 (120~320 Hz) 映射到 A150 频率 (0~120 Hz):
  *
- *    系统频率范围: SET_FREQ_MIN(80) ~ SET_FREQ_MAX(320)
+ *    系统频率范围: SET_FREQ_MIN(120) ~ SET_FREQ_MAX(320)
  *    A150频率范围: 0 ~ 120 Hz
  *
- *    映射公式: a150_freq = (sys_freq - 80) * 120 / (320 - 80)
- *    即:       a150_freq = (sys_freq - 80) * 120 / 240
- *              a150_freq = (sys_freq - 80) / 2
+ *    映射公式: a150_freq = (sys_freq - 120) * 120 / (320 - 120)
+ *              a150_freq = (sys_freq - 120) * 120 / 200
+ *              a150_freq = (sys_freq - 120) * 3 / 5
  *
- *    80Hz  → 0Hz   (最低, A150不启动, 等效停机下限)
- *    200Hz → 60Hz  (中间)
+ *    120Hz → 0Hz   (最低)
+ *    220Hz → 60Hz  (中间)
  *    320Hz → 120Hz (最高)
  *
  *  注意: cmd=0x00 时直接写0, 不做映射
@@ -260,12 +260,12 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
         a150_freq = 0;
     } else {
         /* 启动/调频: 映射系统频率到 A150 频率 */
-        if (freq_hz <= 80) {
+        if (freq_hz <= 120) {
             a150_freq = 0;
         } else if (freq_hz >= 320) {
             a150_freq = INV_A150_FREQ_MAX;
         } else {
-            a150_freq = (freq_hz - 80) / 2;
+            a150_freq = (uint16_t)((uint32_t)(freq_hz - 120) * 120 / 200);
         }
     }
 
