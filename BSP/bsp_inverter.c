@@ -264,14 +264,8 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
         /* 停机: 写频率 0 */
         a150_freq = 0;
     } else {
-        /* 启动/调频: 映射系统频率到 A150 频率 */
-        if (freq_hz <= 120) {
-            a150_freq = 0;
-        } else if (freq_hz >= 320) {
-            a150_freq = INV_A150_FREQ_MAX;
-        } else {
-            a150_freq = (uint16_t)((uint32_t)(freq_hz - 120) * 120 / 200);
-        }
+        /* 直接透传: 系统频率 = A150频率, 不做映射 */
+        a150_freq = freq_hz;
     }
 
     /* 上限保护 */

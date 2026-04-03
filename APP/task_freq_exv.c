@@ -60,7 +60,7 @@ static float s_last_freq = 0.0f;
 #define RAMP_STEP_MAX  20.0f
 
 /* --- PID自动调频上限 (超过此值需手动按键调频) --- */
-#define PID_AUTO_FREQ_CAP  160.0f
+#define PID_AUTO_FREQ_CAP  40.0f
 
 /* --- 设置压缩机频率 (含上下限保护 + 启动限速) --- */
 static void PID_SetFreq(float freq_hz)

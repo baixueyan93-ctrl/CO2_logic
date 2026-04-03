@@ -35,7 +35,7 @@
 #define SET_DISCHARGE_PMAX_L    70.0f      /* ����ѹ������-�͵� Pmax (bar)                  */
 #define SET_SUCTION_PMIN        20.0f      /* ����ѹ������ Pmin (bar)                       */
 #define SET_VDC_MIN             300.0f     /* ��Դ��ѹ���� VDCmin (V), ������Ӳ��ȷ��       */
-#define SET_FREQ_INIT           160.0f     /* 压缩机初始频率 (Hz), 160Hz → A150 24Hz      */
+#define SET_FREQ_INIT           20.0f      /* 压缩机初始频率 (Hz), A150直接20Hz启动        */
 
 /* --- 1.4 �ͿǼ��� --- */
 #define SET_OIL_HEAT_TEMP       10.0f      /* �ͿǼ��ȿ��������¶���ֵ (��10��C ��)       */
@@ -68,8 +68,8 @@
  * =================================================================== */
 #define SET_DT_MAX              5.0f       /* ��Tmax: �����Ƶ�²���ֵ (��C)                */
 #define SET_DT_MIN              1.0f       /* ��Tmin: ���������²����� (��C)                */
-#define SET_FREQ_MIN            160.0f     /* Fmin: 压缩机最低频率 (Hz), 160Hz → A150 24Hz */
-#define SET_FREQ_MAX            320.0f     /* Fmax: 压缩机最高频率 (Hz), 320Hz=4800RPM    */
+#define SET_FREQ_MIN            20.0f      /* Fmin: 压缩机最低频率 (Hz), A150最低20Hz      */
+#define SET_FREQ_MAX            120.0f     /* Fmax: 压缩机最高频率 (Hz), A150最大120Hz     */
 #define SET_SH_MIN_LOW          5.0f       /* ���ȶ�����-��ֵ ��TPmin (��C)                 */
 #define SET_SH_MIN_HIGH         9.0f       /* ���ȶ�����-��ֵ ��TPmin (��C)                 */
 #define SET_HT_DIFF_TARGET      6.5f       /* �����²� ��TCZ Ŀ��ֵ (��C)                   */
