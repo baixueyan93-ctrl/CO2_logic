@@ -223,6 +223,11 @@ void BSP_Inverter_Init(void)
     /* RS485 默认为接收模式 */
     RS485_SetRx();
 
+    /* Modbus使用阻塞式收发, 禁用UART4中断防止Overrun错误卡死系统 */
+    HAL_NVIC_DisableIRQ(UART4_IRQn);
+    __HAL_UART_DISABLE_IT(&huart4, UART_IT_RXNE);
+    __HAL_UART_DISABLE_IT(&huart4, UART_IT_ERR);
+
     /* 清空状态 */
     InvAckOK = 0;
     memset(&g_InvStatus, 0, sizeof(g_InvStatus));
