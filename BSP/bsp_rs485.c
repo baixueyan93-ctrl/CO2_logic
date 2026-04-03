@@ -1,6 +1,7 @@
 // bsp_rs485.c
 // RS485 调试串口 (USART1, PA9=TX, PA10=RX)
 #include "bsp_rs485.h"
+#include "main.h"
 #include <string.h>
 
 UART_HandleTypeDef huart1;
@@ -33,5 +34,11 @@ void BSP_RS485_Init(void) {
 }
 
 void BSP_RS485_SendString(char *str) {
+    /* RS485方向: 发送模式 */
+    HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_SET);
+
     HAL_UART_Transmit(&huart1, (uint8_t *)str, strlen(str), 1000);
+
+    /* RS485方向: 切回接收模式 */
+    HAL_GPIO_WritePin(RS485_DIR_GPIO_Port, RS485_DIR_Pin, GPIO_PIN_RESET);
 }
