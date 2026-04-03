@@ -1,14 +1,42 @@
 // bsp_rs485.c
-// RS485 调试串口 (USART1, PA9=TX, PA10=RX)
+// RS485 调试串口 (USART1, PA9=TX, PA10=RX, PA8=DIR)
+// 使用 ISO1500DBQR 隔离 RS485 收发器 (U9, IOT-485)
+// PA8 = RE4851: HIGH=发送, LOW=接收
 #include "bsp_rs485.h"
 #include <string.h>
 
+/* RS485_1 方向控制引脚: PA8 (RE4851) */
+#define RS485_1_DIR_PORT  GPIOA
+#define RS485_1_DIR_PIN   GPIO_PIN_8
+
 UART_HandleTypeDef huart1;
 
+static void RS485_1_SetTx(void)
+{
+    HAL_GPIO_WritePin(RS485_1_DIR_PORT, RS485_1_DIR_PIN, GPIO_PIN_SET);
+}
+
+static void RS485_1_SetRx(void)
+{
+    HAL_GPIO_WritePin(RS485_1_DIR_PORT, RS485_1_DIR_PIN, GPIO_PIN_RESET);
+}
+
 void BSP_RS485_Init(void) {
-    /* 手动初始化 USART1: PA9=TX, PA10=RX, 9600 8N1 */
-    __HAL_RCC_USART1_CLK_ENABLE();
+    /* 1. 初始化 PA8 为 GPIO 输出 (RS485_1 方向控制) */
     __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    GPIO_InitTypeDef dir_gpio = {0};
+    dir_gpio.Pin   = RS485_1_DIR_PIN;
+    dir_gpio.Mode  = GPIO_MODE_OUTPUT_PP;
+    dir_gpio.Pull  = GPIO_NOPULL;
+    dir_gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(RS485_1_DIR_PORT, &dir_gpio);
+
+    /* 默认接收模式 */
+    RS485_1_SetRx();
+
+    /* 2. 初始化 USART1: PA9=TX, PA10=RX, 9600 8N1 */
+    __HAL_RCC_USART1_CLK_ENABLE();
 
     GPIO_InitTypeDef gpio = {0};
     gpio.Pin       = GPIO_PIN_9 | GPIO_PIN_10;
@@ -33,5 +61,7 @@ void BSP_RS485_Init(void) {
 }
 
 void BSP_RS485_SendString(char *str) {
+    RS485_1_SetTx();
     HAL_UART_Transmit(&huart1, (uint8_t *)str, strlen(str), 1000);
+    RS485_1_SetRx();
 }
