@@ -5,9 +5,9 @@
 #include "bsp_rs485.h"
 #include <string.h>
 
-/* RS485_1 方向控制引脚: PA8 (RE4851) */
+/* RS485_1 方向控制引脚: PA11 (RE4851) */
 #define RS485_1_DIR_PORT  GPIOA
-#define RS485_1_DIR_PIN   GPIO_PIN_8
+#define RS485_1_DIR_PIN   GPIO_PIN_11
 
 UART_HandleTypeDef huart1;
 
