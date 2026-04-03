@@ -220,13 +220,8 @@ static bool Modbus_ReadHoldRegs(uint16_t reg_addr, uint16_t count,
  * =================================================================== */
 void BSP_Inverter_Init(void)
 {
-    /* RS485 默认为接收模式 */
-    RS485_SetRx();
-
-    /* Modbus使用阻塞式收发, 禁用UART4中断防止Overrun错误卡死系统 */
-    HAL_NVIC_DisableIRQ(UART4_IRQn);
-    __HAL_UART_DISABLE_IT(&huart4, UART_IT_RXNE);
-    __HAL_UART_DISABLE_IT(&huart4, UART_IT_ERR);
+    /* UART4 当前用作调试串口 (RS485_0), 不再用于 Modbus
+     * RS485 方向控制和中断启用由 BSP_RS485_Init() 负责 */
 
     /* 清空状态 */
     InvAckOK = 0;
@@ -258,13 +253,18 @@ void BSP_Inverter_Init(void)
  * =================================================================== */
 void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
 {
+    /* UART4 当前用作调试串口, Modbus 通信暂时禁用
+     * 恢复变频器通信时取消注释以下代码 */
+    (void)cmd;
+    (void)freq_hz;
+    return;
+
+#if 0  /* === 变频器 Modbus 通信 (暂时禁用) === */
     uint16_t a150_freq = 0;
 
     if (cmd == 0x00) {
-        /* 停机: 写频率 0 */
         a150_freq = 0;
     } else {
-        /* 启动/调频: 映射系统频率到 A150 频率 */
         if (freq_hz <= 120) {
             a150_freq = 0;
         } else if (freq_hz >= 320) {
@@ -274,13 +274,12 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
         }
     }
 
-    /* 上限保护 */
     if (a150_freq > INV_A150_FREQ_MAX) {
         a150_freq = INV_A150_FREQ_MAX;
     }
 
-    /* 通过 Modbus RTU 写频率寄存器 */
     BSP_Inverter_SetFreqDirect(a150_freq);
+#endif
 }
 
 /* ===================================================================
@@ -289,11 +288,9 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
  * =================================================================== */
 void BSP_Inverter_SetFreqDirect(uint16_t freq_hz_a150)
 {
-    if (freq_hz_a150 > INV_A150_FREQ_MAX) {
-        freq_hz_a150 = INV_A150_FREQ_MAX;
-    }
-
-    Modbus_WriteSingleReg(INV_REG_FREQ_SET_ACTUAL, freq_hz_a150);
+    /* UART4 当前用作调试串口, Modbus 暂时禁用 */
+    (void)freq_hz_a150;
+    return;
 }
 
 /* ===================================================================
@@ -306,32 +303,11 @@ void BSP_Inverter_SetFreqDirect(uint16_t freq_hz_a150)
  * =================================================================== */
 bool BSP_Inverter_ReadStatus(InvStatus_t *out)
 {
-    uint16_t regs[14];  /* 2100~2113 */
-
-    if (!Modbus_ReadHoldRegs(INV_READ_START_ADDR, 14, regs)) {
-        if (out) {
-            out->comm_ok = false;
-        }
-        return false;
-    }
-
+    /* UART4 当前用作调试串口, Modbus 暂时禁用 */
     if (out) {
-        out->status          = regs[0];   /* 2100: 工作状态 */
-        out->fault_stop      = regs[1];   /* 2101: 停机故障码 */
-        out->fault_warn      = regs[2];   /* 2102: 报警故障码 */
-        out->motor_speed_hz  = regs[3];   /* 2103: 电机转速 */
-        out->out_current_x10 = regs[8];   /* 2108: 输出电流 */
-        out->bus_voltage     = regs[9];   /* 2109: 母线电压 */
-        out->mod_temp        = (int16_t)(regs[10] - 55); /* 2110: 模块温度, 偏移-55 */
-        out->out_power       = 0;         /* 2121 不在本次批量读取范围内 */
-        out->comm_ok         = true;
+        out->comm_ok = false;
     }
-
-    /* 同步到全局状态 */
-    g_InvStatus = *out;
-    InvAckOK = 1;
-
-    return true;
+    return false;
 }
 
 /* ===================================================================
@@ -344,12 +320,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == UART4)
     {
-        /* Modbus 当前使用阻塞式收发, 暂不需要中断回调处理 */
-        /* 后续如果改为 DMA/中断方式, 在此处理响应解析 */
-    }
-    else if (huart->Instance == USART1)
-    {
-        /* RS485 调试串口: 逐字节接收 */
+        /* UART4 现在用作调试串口 (RS485_0): 逐字节接收 */
         extern uint8_t rx_buffer[128];
         extern uint16_t rx_index;
         extern volatile uint8_t rx_complete;
@@ -361,8 +332,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             rx_buffer[rx_index] = '\0';
             rx_complete = 1;
         } else {
-            extern UART_HandleTypeDef huart1;
-            HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
+            HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
         }
     }
 }
