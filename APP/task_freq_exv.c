@@ -55,7 +55,11 @@ static bool  s_prev_dt_valid = false;   /* 首次运行时无上一次数据 */
  *  内部辅助函数
  * =================================================================== */
 
-/* --- 设置压缩机频率 (含上下限保护) --- */
+/* --- 启动限速: 每次最多升 20Hz, 降频不限制 --- */
+static float s_last_freq = 0.0f;
+#define RAMP_STEP_MAX  20.0f
+
+/* --- 设置压缩机频率 (含上下限保护 + 启动限速) --- */
 static void PID_SetFreq(float freq_hz)
 {
     /* 上限保护 */
@@ -66,6 +70,12 @@ static void PID_SetFreq(float freq_hz)
     if (freq_hz < SET_FREQ_MIN) {
         freq_hz = SET_FREQ_MIN;
     }
+
+    /* 启动限速: 升频每次最多 20Hz, 降频无限制 */
+    if (s_last_freq > 0.0f && freq_hz > s_last_freq + RAMP_STEP_MAX) {
+        freq_hz = s_last_freq + RAMP_STEP_MAX;
+    }
+    s_last_freq = freq_hz;
 
     /* 写入全局状态 */
     SysState_Lock();
@@ -110,6 +120,7 @@ static void PID_StopCompressor(void)
 {
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
     BSP_Inverter_Send(0x00, 0);
+    s_last_freq = 0.0f;  /* 重置限速, 下次启动从低频开始 */
     BSP_RS485_SendString("[PID] COMP STOP\r\n");
 }
 
