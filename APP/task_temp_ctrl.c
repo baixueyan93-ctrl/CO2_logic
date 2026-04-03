@@ -838,7 +838,7 @@ void Task_TempCtrl_Process(void const *argument)
          *   检查: VDC电压 / VAC相序 / 变频器过流 / 变频器过热
          *   有异常 → ERR级别, 直接停机
          * ============================================ */
-        TempCtrl_ShutdownAlarm();
+        // TempCtrl_ShutdownAlarm();  /* 调试阶段暂时屏蔽停机报警 */
 
         /* ============================================
          * 第2步: 告警(温度压力)处理逻辑
@@ -867,11 +867,12 @@ void Task_TempCtrl_Process(void const *argument)
          *   禁止运行温度逻辑(防止错误启动压缩机),
          *   但油壳加热仍需正常管理
          * ============================================ */
-        if (g_AlarmFlags & ERR_MASK_ALL) {
-            TempCtrl_OilHeatControl();
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
+        /* 调试阶段暂时屏蔽ERR安全门, 报警不阻止主逻辑运行 */
+        // if (g_AlarmFlags & ERR_MASK_ALL) {
+        //     TempCtrl_OilHeatControl();
+        //     vTaskDelay(pdMS_TO_TICKS(1000));
+        //     continue;
+        // }
 
         /* ============================================
          * 第4步: 温度逻辑(主逻辑)

@@ -147,9 +147,9 @@ void Task_Panel_Process(void const *argument)
             }
             else {
                 /* 正常模式下: 上/下调频率并发送 (用于调试) */
-                static uint16_t s_test_freq = 80;
-                if (key0 == KEY_CODE_UP)   { s_test_freq += 2; }
-                if (key0 == KEY_CODE_DOWN) { s_test_freq -= 2; }
+                static uint16_t s_test_freq = 160;
+                if (key0 == KEY_CODE_UP)   { s_test_freq += 10; }
+                if (key0 == KEY_CODE_DOWN) { s_test_freq -= 10; }
                 if (s_test_freq > INV_FREQ_MAX) s_test_freq = INV_FREQ_MAX;
                 if (s_test_freq < INV_FREQ_MIN) s_test_freq = INV_FREQ_MIN;
                 BSP_Inverter_Send(0x02, s_test_freq);

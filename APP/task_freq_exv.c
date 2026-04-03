@@ -59,6 +59,9 @@ static bool  s_prev_dt_valid = false;   /* 首次运行时无上一次数据 */
 static float s_last_freq = 0.0f;
 #define RAMP_STEP_MAX  20.0f
 
+/* --- PID自动调频上限 (超过此值需手动按键调频) --- */
+#define PID_AUTO_FREQ_CAP  160.0f
+
 /* --- 设置压缩机频率 (含上下限保护 + 启动限速) --- */
 static void PID_SetFreq(float freq_hz)
 {
@@ -69,6 +72,11 @@ static void PID_SetFreq(float freq_hz)
     /* 下限保护 */
     if (freq_hz < SET_FREQ_MIN) {
         freq_hz = SET_FREQ_MIN;
+    }
+
+    /* PID自动调频上限: 超过160Hz需手动按键调 */
+    if (freq_hz > PID_AUTO_FREQ_CAP) {
+        freq_hz = PID_AUTO_FREQ_CAP;
     }
 
     /* 启动限速: 升频每次最多 20Hz, 降频无限制 */
