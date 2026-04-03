@@ -67,8 +67,8 @@
 #define INV_TX_MAX_LEN          16      /* 发送帧最大长度 */
 #define INV_RX_MAX_LEN          64      /* 接收帧最大长度 */
 
-/* --- 频率范围 (A150: 0~120Hz) --- */
-#define INV_A150_FREQ_MAX       120     /* A150 最大频率 120Hz */
+/* --- 频率范围 (A150: 0~360Hz, 压缩机用120~320Hz) --- */
+#define INV_A150_FREQ_MAX       320     /* A150 最大频率限制 320Hz */
 
 /* --- 系统频率范围 (兼容旧宏, 供上层使用) --- */
 #define INV_FREQ_MIN            120     /* 系统最低频率 (Hz), 映射到 A150 的 20Hz */

@@ -147,7 +147,7 @@ void Task_Panel_Process(void const *argument)
             }
             else {
                 /* 正常模式下: 上/下调频率并发送 (用于调试) */
-                static uint16_t s_test_freq = 40;
+                static uint16_t s_test_freq = 160;
                 if (key0 == KEY_CODE_UP)   { s_test_freq += 10; }
                 if (key0 == KEY_CODE_DOWN) { s_test_freq -= 10; }
                 if (s_test_freq > INV_FREQ_MAX) s_test_freq = INV_FREQ_MAX;
@@ -190,8 +190,8 @@ void Task_Panel_Process(void const *argument)
                 g_system_on = !g_system_on;
                 if (g_system_on) {
                     xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
-                    BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);  /* 开机, 初始频率20Hz */
-                    BSP_RS485_SendString("[KEY] COMP START 20Hz\r\n");
+                    BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);  /* 开机, 初始频率120Hz */
+                    BSP_RS485_SendString("[KEY] COMP START 120Hz\r\n");
                 } else {
                     BSP_Inverter_Send(0x00, 0);                         /* 关机 */
                     BSP_RS485_SendString("[KEY] COMP STOP\r\n");
