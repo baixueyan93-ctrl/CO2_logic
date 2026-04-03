@@ -330,6 +330,3 @@ void Task_RS485Log_Process(void const *argument) {
         osDelay(50);
     }
 }
-
-
-

@@ -7,8 +7,10 @@
 #include "sys_config.h"
 #include "bsp_relay.h"
 #include "bsp_inverter.h"
+#include "bsp_rs485.h"
 #include "task_panel.h"
 #include <stdbool.h>
+#include <stdio.h>
 
 /* ===========================================================================
  * 温度控制流程 (逻辑图1) — 实现文件
