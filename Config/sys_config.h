@@ -70,8 +70,8 @@
 #define SET_DT_MIN              1.0f       /* ��Tmin: ���������²����� (��C)                */
 #define SET_FREQ_MIN            120.0f     /* Fmin: 压缩机最低频率 (Hz), 120Hz             */
 #define SET_FREQ_MAX            320.0f     /* Fmax: 压缩机最高频率 (Hz), 320Hz=4800RPM    */
-#define SET_SH_MIN_LOW          6.5f       /* ���ȶ�����-��ֵ ��TPmin (��C)                 */
-#define SET_SH_MIN_HIGH         8.0f       /* ���ȶ�����-��ֵ ��TPmin (��C)                 */
+#define SET_SH_MIN_LOW          5.0f       /* ���ȶ�����-��ֵ ��TPmin (��C)                 */
+#define SET_SH_MIN_HIGH         9.0f       /* ���ȶ�����-��ֵ ��TPmin (��C)                 */
 #define SET_HT_DIFF_TARGET      6.5f       /* �����²� ��TCZ Ŀ��ֵ (��C)                   */
 #define SET_HT_DIFF_TOL         1.5f       /* �����²� ��TCZ �ݲ� (��1.5��C)                */
 #define SET_PID_ALPHA1          0.5f       /* ��1: �����²����ϵ��                         */
