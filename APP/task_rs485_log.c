@@ -13,7 +13,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-extern UART_HandleTypeDef huart4;
+extern UART_HandleTypeDef huart1;
 extern osMutexId EEPROM_MutexHandle;
 
 /* KEY 调试模式标志 */
@@ -28,7 +28,7 @@ uint16_t rx_index = 0;     // ��ǰ�浽�˵ڼ���
 volatile uint8_t rx_complete = 0; // ������ɱ�־ (1��ʾ������)
 
 /* HAL_UART_RxCpltCallback 已统一在 bsp_inverter.c 中,
-   UART4 分支处理调试串口逐字节接收 (RS485_0 口) */
+   UART4 分支处理 RS485 接收逻辑 */
 
 // ==========================================
 // ���ϼ�¼����
@@ -76,8 +76,8 @@ void Task_RS485Log_Process(void const *argument) {
     BSP_RS485_SendString("\r\n--- Simple Mode Ready! ---\r\n");
     
     // ������һ���жϽ��� (ֻ�� 1 ���ֽ�)
-    HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
-
+    HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
+    
     for(;;) {
         // ����ж�˵"��ָ������"
         if (rx_complete == 1) {
@@ -288,13 +288,13 @@ void Task_RS485Log_Process(void const *argument) {
             // �������ܲ����Ĵ���Ӳ�������־λ
             // ��ֹ RS485 �շ��л�˲��ë�̵���оƬ��Ӳ����������
             // ==========================================
-            __HAL_UART_CLEAR_OREFLAG(&huart4);
-            __HAL_UART_CLEAR_NEFLAG(&huart4);
-            __HAL_UART_CLEAR_FEFLAG(&huart4);
-
-            huart4.ErrorCode = HAL_UART_ERROR_NONE;
-            huart4.RxState = HAL_UART_STATE_READY;
-            HAL_UART_Receive_IT(&huart4, &rx_byte, 1); 
+            __HAL_UART_CLEAR_OREFLAG(&huart1); // ���������� (Overrun)
+            __HAL_UART_CLEAR_NEFLAG(&huart1);  // ����������� (Noise)
+            __HAL_UART_CLEAR_FEFLAG(&huart1);  // ���֡���� (Framing)
+            
+            huart1.ErrorCode = HAL_UART_ERROR_NONE; // ǿ��ƭ�� HAL �⣬˵û�д���
+            huart1.RxState = HAL_UART_STATE_READY;  // ǿ�а�״̬�ָ���"׼������"״̬
+            HAL_UART_Receive_IT(&huart1, &rx_byte, 1); 
         }
         
         /* KEY 调试模式: 持续扫描两个面板的按键并打印 */
@@ -318,13 +318,13 @@ void Task_RS485Log_Process(void const *argument) {
          * UART 接收状态守护: 防止 Overrun/Noise/Frame 错误
          * 导致 HAL 接收中断永久停止
          * ============================================ */
-        if (huart4.RxState != HAL_UART_STATE_BUSY_RX) {
-            __HAL_UART_CLEAR_OREFLAG(&huart4);
-            __HAL_UART_CLEAR_NEFLAG(&huart4);
-            __HAL_UART_CLEAR_FEFLAG(&huart4);
-            huart4.ErrorCode = HAL_UART_ERROR_NONE;
-            huart4.RxState   = HAL_UART_STATE_READY;
-            HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
+        if (huart1.RxState != HAL_UART_STATE_BUSY_RX) {
+            __HAL_UART_CLEAR_OREFLAG(&huart1);
+            __HAL_UART_CLEAR_NEFLAG(&huart1);
+            __HAL_UART_CLEAR_FEFLAG(&huart1);
+            huart1.ErrorCode = HAL_UART_ERROR_NONE;
+            huart1.RxState   = HAL_UART_STATE_READY;
+            HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
         }
 
         osDelay(50);
