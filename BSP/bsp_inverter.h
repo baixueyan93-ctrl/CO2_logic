@@ -44,20 +44,20 @@
 #define INV_REG_FREQ_LOWER      0x07DA  /* 2010: 频率下限 */
 #define INV_REG_FREQ_MAX        0x07DB  /* 2011: 最大频率 */
 
-/* --- A150 读寄存器地址 --- */
-#define INV_REG_STATUS          0x0834  /* 2100: 工作状态 */
-#define INV_REG_FAULT_STOP      0x0835  /* 2101: 停机故障码 */
-#define INV_REG_FAULT_WARN      0x0836  /* 2102: 报警故障码 */
-#define INV_REG_MOTOR_SPEED     0x0837  /* 2103: 电机转速 (Hz) */
-#define INV_REG_OUT_CURRENT     0x083C  /* 2108: 输出电流 (x0.1A) */
-#define INV_REG_BUS_VOLTAGE     0x083D  /* 2109: 母线电压 (Vdc) */
-#define INV_REG_MOD_TEMP        0x083E  /* 2110: 模块温度 */
-#define INV_REG_HEATSINK_TEMP   0x083F  /* 2111: 散热器温度 */
-#define INV_REG_RUN_HOURS       0x0840  /* 2112: 累计运行时间 (h) */
-#define INV_REG_OUT_VOLTAGE     0x0841  /* 2113: 输出线电压 (Vrms) */
-#define INV_REG_IN_VOLTAGE      0x0844  /* 2116: 输入电压 (Vrms) */
-#define INV_REG_IN_CURRENT      0x0845  /* 2117: 输入电流 (x0.1A) */
-#define INV_REG_OUT_POWER       0x0849  /* 2121: 输出功率 (W) */
+/* --- A150 读寄存器地址 (Modbus地址 = 寄存器编号 - 1) --- */
+#define INV_REG_STATUS          0x0833  /* 2100: 工作状态 */
+#define INV_REG_FAULT_STOP      0x0834  /* 2101: 停机故障码 */
+#define INV_REG_FAULT_WARN      0x0835  /* 2102: 报警故障码 */
+#define INV_REG_MOTOR_SPEED     0x0836  /* 2103: 电机转速 (Hz) */
+#define INV_REG_OUT_CURRENT     0x083B  /* 2108: 输出电流 (x0.1A) */
+#define INV_REG_BUS_VOLTAGE     0x083C  /* 2109: 母线电压 (Vdc) */
+#define INV_REG_MOD_TEMP        0x083D  /* 2110: 模块温度 */
+#define INV_REG_HEATSINK_TEMP   0x083E  /* 2111: 散热器温度 */
+#define INV_REG_RUN_HOURS       0x083F  /* 2112: 累计运行时间 (h) */
+#define INV_REG_OUT_VOLTAGE     0x0840  /* 2113: 输出线电压 (Vrms) */
+#define INV_REG_IN_VOLTAGE      0x0843  /* 2116: 输入电压 (Vrms) */
+#define INV_REG_IN_CURRENT      0x0844  /* 2117: 输入电流 (x0.1A) */
+#define INV_REG_OUT_POWER       0x0848  /* 2121: 输出功率 (W) */
 
 /* --- 读寄存器批量读取: 从 2100 开始连续读取数量 --- */
 #define INV_READ_START_ADDR     INV_REG_STATUS
