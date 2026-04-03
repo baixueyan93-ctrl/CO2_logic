@@ -50,7 +50,7 @@
  * =================================================================== */
 #define SET_DEF_INTERVAL        (3 * 3600) /* ��˪���ʱ�� (��), 2~3Сʱ                   */
 #define SET_DEF_MIN_INTV        (2 * 3600) /* ��˪��̼��ʱ�� (��), 2Сʱ                 */
-#define SET_DEF_HEAT_MAX        (10 * 60)  /* 加热最大时间 (秒), 10分钟                    */
+#define SET_DEF_HEAT_MAX        (5 * 60)   /* 加热最大时间 (秒), 5分钟                     */
 #define SET_DEF_HEAT_TLIMIT     10.0f      /* �����¶�����/��˪�˳��¶� (��C)               */
 #define SET_DRIP_TIME           (5 * 60)   /* ��ˮʱ�� (��), 5����                         */
 #define SET_DEF_COMP_DLY        15         /* ��˪��ѹ���������ӳ� (��)                    */
