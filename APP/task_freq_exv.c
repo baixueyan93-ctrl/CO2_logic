@@ -132,8 +132,17 @@ void FreqExv_FreqAdjust(void)
         return;
     }
 
-    /* 热车未完成(8-10秒校准期), 保持初始频率不动 */
+    /* 等待压缩机实际到达120Hz(1800转)再开始调频
+     * A150从0加速到120Hz需要约70秒, 不能用固定时间,
+     * 而是读A150实际转速, 确认到达后才开始 */
     if (!(sys_bits & ST_WARMUP_DONE)) {
+        /* 每秒读一次A150实际转速 */
+        if (g_InvStatus.comm_ok &&
+            g_InvStatus.motor_speed_hz >= (uint16_t)(SET_FREQ_INIT - 5)) {
+            /* 实际转速 ≥ 115Hz (允许5Hz误差), 认为到达 */
+            xEventGroupSetBits(SysEventGroup, ST_WARMUP_DONE);
+            BSP_RS485_SendString("[FREQ] Compressor reached 120Hz, start adjusting\r\n");
+        }
         return;
     }
 
