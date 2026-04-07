@@ -231,30 +231,31 @@ void BSP_Inverter_Init(void)
     /* 清空状态 */
     InvAckOK = 0;
     memset(&g_InvStatus, 0, sizeof(g_InvStatus));
+
+    /* 配置 A150 频率参数 (规格书默认可能只有0~120Hz)
+     * 压缩机需要 120~320Hz, 必须先设置频率上下限和最大频率
+     * 寄存器地址使用 Modbus地址 = 寄存器号 - 1 */
+    HAL_Delay(500);  /* 等待A150 RS485就绪 */
+    Modbus_WriteSingleReg(INV_REG_FREQ_MAX,   360);  /* 2011: 最大频率=360Hz */
+    HAL_Delay(50);
+    Modbus_WriteSingleReg(INV_REG_FREQ_UPPER, 320);  /* 2009: 频率上限=320Hz */
+    HAL_Delay(50);
+    Modbus_WriteSingleReg(INV_REG_FREQ_LOWER, 120);  /* 2010: 频率下限=120Hz */
+    HAL_Delay(50);
 }
 
 /* ===================================================================
- *  BSP_Inverter_Send — 兼容旧接口
+ *  BSP_Inverter_Send — 变频器控制接口
  *
- *  上层逻辑调用方式不变:
+ *  A150 启停逻辑 (规格书 7.2):
+ *    频率 > 频率下限(120Hz) → A150自动启动压缩机至目标频率
+ *    频率 = 0               → A150停机
+ *    A150内部自带升降频速率控制, 不会瞬间跳到目标频率
+ *
+ *  调用方式:
  *    cmd=0x00, freq=0   → 停机 (写频率0)
- *    cmd=0x01, freq=120 → 启动 (写初始频率)
- *    cmd=0x02, freq=xxx → 调频 (写目标频率)
- *
- *  内部将系统频率 (120~320 Hz) 映射到 A150 频率 (0~120 Hz):
- *
- *    系统频率范围: SET_FREQ_MIN(120) ~ SET_FREQ_MAX(320)
- *    A150频率范围: 0 ~ 120 Hz
- *
- *    映射公式: a150_freq = (sys_freq - 120) * 120 / (320 - 120)
- *              a150_freq = (sys_freq - 120) * 120 / 200
- *              a150_freq = (sys_freq - 120) * 3 / 5
- *
- *    120Hz → 0Hz   (最低)
- *    220Hz → 60Hz  (中间)
- *    320Hz → 120Hz (最高)
- *
- *  注意: cmd=0x00 时直接写0, 不做映射
+ *    cmd=0x01, freq=120 → 启动 (写初始频率120Hz)
+ *    cmd=0x02, freq=xxx → 调频 (写目标频率, 直接透传)
  * =================================================================== */
 void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
 {
