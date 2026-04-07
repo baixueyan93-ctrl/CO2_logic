@@ -190,8 +190,25 @@ void Task_Panel_Process(void const *argument)
                 g_system_on = !g_system_on;
                 if (g_system_on) {
                     xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
-                    BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);  /* 开机, 初始频率120Hz */
-                    BSP_RS485_SendString("[KEY] COMP START 120Hz\r\n");
+                    BSP_RS485_SendString("[KEY] Power ON, waiting inverter...\r\n");
+                    /* 等待变频器校准就绪后再发频率 */
+                    {
+                        InvStatus_t st;
+                        bool inv_ready = false;
+                        for (int i = 0; i < 15; i++) {  /* 面板按键等15秒 */
+                            if (BSP_Inverter_ReadStatus(&st) && st.fault_stop == 0) {
+                                inv_ready = true;
+                                break;
+                            }
+                            vTaskDelay(pdMS_TO_TICKS(1000));
+                        }
+                        if (inv_ready) {
+                            BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
+                            BSP_RS485_SendString("[KEY] COMP START 120Hz\r\n");
+                        } else {
+                            BSP_RS485_SendString("[KEY] Inverter not ready!\r\n");
+                        }
+                    }
                 } else {
                     BSP_Inverter_Send(0x00, 0);                         /* 关机 */
                     BSP_RS485_SendString("[KEY] COMP STOP\r\n");
