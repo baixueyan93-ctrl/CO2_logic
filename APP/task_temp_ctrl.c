@@ -713,16 +713,8 @@ void TempCtrl_MainLogic(void)
              *
              *   热车期间保持F=120Hz, 不做PID调整
              */
-            if (CompressorWarmup_IsDone()) {
-                /* 热车完成 → 检查PID周期 */
-                if (tmr_bits & ST_TMR_PID_DONE) {
-                    TempCtrl_PID_Adjust();
-                    /* 复位PID周期计时器, 等待下一个30s */
-                    g_TimerData.TMR_PID_CNT = 0;
-                    xEventGroupClearBits(SysTimerEventGroup, ST_TMR_PID_DONE);
-                }
-            }
-            /* else: 热车中, 保持F=120Hz继续运转 */
+            /* PID频率调节和膨胀阀调节已迁移到 task_freq_exv 独立任务
+             * 此处无需操作, task_freq_exv 自行管理PID周期和热车状态 */
 
         } else {
             /* N → 温度已降到位(Tc < Ts+C1), 停止运行

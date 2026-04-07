@@ -19,7 +19,7 @@
 float   g_set_temp   = SET_TEMP_TS;  /* 用户设定温度, 默认跟随Ts */
 uint8_t g_panel_mode = 0;       /* 0: 正常监控, 1: 温度设置模式 */
 bool    g_light_on   = false;   /* 照明灯状态 */
-bool    g_system_on  = true;    /* 系统电源状态 */
+bool    g_system_on  = false;   /* 系统电源状态, 上电默认关 (需按键开机) */
 
 static uint32_t s_set_mode_tick = 0;
 #define SET_MODE_TIMEOUT_MS  5000   /* 5秒无操作自动退出设置模式 */

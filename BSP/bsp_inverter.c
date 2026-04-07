@@ -1,4 +1,6 @@
 #include "bsp_inverter.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
 #include <string.h>
 
 /* ===================================================================
@@ -34,6 +36,9 @@ InvStatus_t g_InvStatus = {0};
  * =================================================================== */
 static uint8_t s_tx_buf[INV_FRAME_LEN];
 static uint8_t s_rx_buf[INV_FRAME_LEN];
+
+/* 互斥锁: 防止多任务同时发送帧 (task_freq_exv / task_temp_ctrl / task_panel) */
+static SemaphoreHandle_t s_inv_mutex = NULL;
 
 /* ===================================================================
  *  RS485 方向控制 (PC12)
@@ -128,6 +133,11 @@ void BSP_Inverter_Init(void)
     /* 清空状态 */
     InvAckOK = 0;
     memset(&g_InvStatus, 0, sizeof(g_InvStatus));
+
+    /* 创建互斥锁 (多任务调用BSP_Inverter_Send时保护共享缓冲区) */
+    if (s_inv_mutex == NULL) {
+        s_inv_mutex = xSemaphoreCreateMutex();
+    }
 }
 
 /* ===================================================================
@@ -148,6 +158,11 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
         freq_hz = INV_FREQ_ABS_MAX;
     }
 
+    /* 加锁: 防止多任务同时操作RS485和共享缓冲区 */
+    if (s_inv_mutex != NULL) {
+        xSemaphoreTake(s_inv_mutex, portMAX_DELAY);
+    }
+
     /* 组帧 */
     BuildFrame(cmd, freq_hz);
 
@@ -158,7 +173,12 @@ void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
     g_InvStatus.last_cmd = cmd;
     g_InvStatus.last_freq_hz = freq_hz;
 
-    (void)ok;  /* echo失败不阻塞, 上层通过 g_InvStatus.comm_ok 判断 */
+    /* 解锁 */
+    if (s_inv_mutex != NULL) {
+        xSemaphoreGive(s_inv_mutex);
+    }
+
+    (void)ok;
 }
 
 /* ===================================================================
