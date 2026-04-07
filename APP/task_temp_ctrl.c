@@ -268,9 +268,9 @@ void TempCtrl_ShutdownAlarm(void)
  *
  *  流程图 (1.1):
  *    开启压缩机
- *    → F = 125 (初始频率125Hz)
+ *    → F = 120 (初始频率120Hz)
  *    → 热车时长C20到时?
- *        N → 继续等待 (保持F=125运行)
+ *        N → 继续等待 (保持F=120运行)
  *        Y → 进入PID调整模块
  *    → PID计算, 幅度限制及输出
  *    → 结束
@@ -674,7 +674,7 @@ void TempCtrl_MainLogic(void)
         if (tc >= g_set_temp + SET_TEMP_HYST_C1) {
             /* Y → 开启压缩机
              *   调用子逻辑2(压缩机开机逻辑):
-             *   设置F=125Hz, 启动热车计时C20
+             *   设置F=120Hz, 启动热车计时C20
              */
             TempCtrl_CompressorStart();
 
@@ -711,7 +711,7 @@ void TempCtrl_MainLogic(void)
              *   a) 热车时长C20已完成 (CompressorWarmup_IsDone)
              *   b) PID周期30s到时 (ST_TMR_PID_DONE)
              *
-             *   热车期间保持F=125Hz, 不做PID调整
+             *   热车期间保持F=120Hz, 不做PID调整
              */
             if (CompressorWarmup_IsDone()) {
                 /* 热车完成 → 检查PID周期 */
@@ -722,7 +722,7 @@ void TempCtrl_MainLogic(void)
                     xEventGroupClearBits(SysTimerEventGroup, ST_TMR_PID_DONE);
                 }
             }
-            /* else: 热车中, 保持F=125Hz继续运转 */
+            /* else: 热车中, 保持F=120Hz继续运转 */
 
         } else {
             /* N → 温度已降到位(Tc < Ts+C1), 停止运行
