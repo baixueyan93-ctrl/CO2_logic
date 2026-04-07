@@ -336,9 +336,9 @@ void TempCtrl_CompressorStart(void)
         return;
     }
 
-    /* ---- 第1步: 开启压缩机, 设定初始频率 F=125Hz ---- */
+    /* ---- 第1步: 开启压缩机, 设定初始频率120Hz ---- */
     Compressor_Start();
-    Compressor_SetFreq(SET_FREQ_INIT);  /* F = 125Hz */
+    /* 注意: Compressor_Start() 内部已经发了120Hz, 不需要再调 Compressor_SetFreq */
 
     /* ---- 第2步: 启动热车计时器 C20 ----
      * 热车计时由定时中断服务(逻辑图5)中的1s定时器驱动:

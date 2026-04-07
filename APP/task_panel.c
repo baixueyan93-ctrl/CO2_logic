@@ -199,6 +199,8 @@ void Task_Panel_Process(void const *argument)
                     BSP_RS485_SendString("[KEY] COMP STOP\r\n");
                     xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
                     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
+                    xEventGroupClearBits(SysEventGroup, ST_WARMUP_DONE);  /* 重置热车, 下次开机要重新校准 */
+                    xEventGroupSetBits(SysEventGroup, ST_FIRST_RUN);      /* 重置首次运行, 重新等C3 */
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(150));  /* 消抖 */
