@@ -854,10 +854,10 @@ void Task_TempCtrl_Process(void const *argument)
 {
     (void)argument;
 
-    /* 系统初始化: 置位首次运行标志, 启动通电延迟C3计时
-     * (对应流程图"系统初始化"步骤)
+    /* 系统初始化: 上电后不自动开机, 等待用户按电源键启动
+     * C3计时器在按键开机后才开始有意义
      */
-    xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);   /* 上电默认开机 */
+    /* xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON); */ /* 去掉自动开机, 必须按键 */
     xEventGroupSetBits(SysEventGroup, ST_FIRST_RUN);
     g_TimerData.TMR_C3_CNT = 0;
     xEventGroupClearBits(SysTimerEventGroup, ST_TMR_C3_DONE);
