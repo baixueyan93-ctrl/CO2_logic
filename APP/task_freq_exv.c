@@ -117,8 +117,7 @@ static void PID_StopCompressor(void)
  *    -5℃ < ΔT ≤ -2℃: -2Hz/s
  *    ΔT ≤ -5℃:     -3Hz/s  (过冷, 快速降频)
  *
- *  A150变频器内部自带升降频速率控制(0~60:3rps/s, 60~75:2rps/s, >75:1rps/s)
- *  所以即使主控板每秒写一次新频率, A150也会平滑过渡
+ *  变频板内部自带升降频速率控制, 主控板每秒写一次新频率, 变频板平滑过渡
  * =================================================================== */
 void FreqExv_FreqAdjust(void)
 {
@@ -132,16 +131,15 @@ void FreqExv_FreqAdjust(void)
         return;
     }
 
-    /* 等待压缩机实际到达120Hz(1800转)再开始调频
-     * A150从0加速到120Hz需要约70秒, 不能用固定时间,
-     * 而是读A150实际转速, 确认到达后才开始 */
+    /* 等待热车完成 (C20定时器)
+     * 老师变频板暂无转速回读, 用定时器等待压缩机稳定到120Hz
+     * C20时间由 task_timer 倒计时, 到时设置 ST_TMR_WARMUP_DONE,
+     * 再由主逻辑设置 ST_WARMUP_DONE */
     if (!(sys_bits & ST_WARMUP_DONE)) {
-        /* 每秒读一次A150实际转速 */
-        if (g_InvStatus.comm_ok &&
-            g_InvStatus.motor_speed_hz >= (uint16_t)(SET_FREQ_INIT - 5)) {
-            /* 实际转速 ≥ 115Hz (允许5Hz误差), 认为到达 */
+        EventBits_t tmr = xEventGroupGetBits(SysTimerEventGroup);
+        if (tmr & ST_TMR_WARMUP_DONE) {
             xEventGroupSetBits(SysEventGroup, ST_WARMUP_DONE);
-            BSP_RS485_SendString("[FREQ] Compressor reached 120Hz, start adjusting\r\n");
+            BSP_RS485_SendString("[FREQ] Warmup done (C20), start adjusting\r\n");
         }
         return;
     }
@@ -404,37 +402,19 @@ void Task_FreqExv_Process(void const *argument)
         }
 
         /* ============================================
-         * 每5秒: 轮询变频器状态
+         * 每5秒: 打印变频器通信状态 (老师板子无状态回读)
          * ============================================ */
         s_inv_poll_cnt++;
         if (s_inv_poll_cnt >= 5) {
             s_inv_poll_cnt = 0;
 
-            InvStatus_t inv_st;
-            if (BSP_Inverter_ReadStatus(&inv_st)) {
-                if (inv_st.fault_stop != 0) {
-                    g_AlarmFlags |= ERR_INV_OVERCURR;
-                    char msg[80];
-                    sprintf(msg, "[INV] FAULT STOP: 0x%04X\r\n", inv_st.fault_stop);
-                    BSP_RS485_SendString(msg);
-                }
-                if (inv_st.fault_warn != 0) {
-                    char msg[80];
-                    sprintf(msg, "[INV] FAULT WARN: 0x%04X\r\n", inv_st.fault_warn);
-                    BSP_RS485_SendString(msg);
-                }
-                {
-                    char msg[80];
-                    sprintf(msg, "[INV] SPD:%dHz STS:0x%04X I:%d.%dA V:%dV\r\n",
-                            inv_st.motor_speed_hz,
-                            inv_st.status,
-                            inv_st.out_current_x10 / 10,
-                            inv_st.out_current_x10 % 10,
-                            inv_st.bus_voltage);
-                    BSP_RS485_SendString(msg);
-                }
+            if (g_InvStatus.comm_ok) {
+                char msg[80];
+                sprintf(msg, "[INV] OK CMD:%d FREQ:%dHz\r\n",
+                        g_InvStatus.last_cmd, g_InvStatus.last_freq_hz);
+                BSP_RS485_SendString(msg);
             } else {
-                BSP_RS485_SendString("[INV] COMM FAIL\r\n");
+                BSP_RS485_SendString("[INV] ECHO FAIL\r\n");
             }
         }
 

@@ -40,38 +40,20 @@ static void OilHeater_Off(void)
     xEventGroupClearBits(SysEventGroup, ST_OIL_HEAT_ON);
 }
 
-/* --- 等待变频器自检完成 ---
- * A150与压缩机上电后有8-10秒自检校准过程,
- * 必须等自检完成后才能发频率指令,否则压缩机会出问题.
+/* --- 等待变频器与压缩机自检校准完成 ---
+ * 变频板与压缩机上电后有8-10秒自检校准过程,
+ * 必须等自检完成后才能发频率指令, 否则压缩机会出问题.
  *
- * 策略: 先强制等10秒(自检最少时间), 然后轮询状态确认就绪.
- *       最多再等20秒, 总计最多30秒.
+ * 老师变频板暂无状态回读, 采用固定等待10秒策略.
  */
-#define INV_SELFTEST_MIN_SEC    10   /* 变频器自检最少等待时间 */
-#define INV_READY_TIMEOUT_SEC   30   /* 总超时时间 */
+#define INV_SELFTEST_SEC    10   /* 变频器自检等待时间 (秒) */
 
 static bool WaitInverterReady(void)
 {
-    InvStatus_t st;
-    BSP_RS485_SendString("[INV] Waiting for inverter self-test (10s)...\r\n");
-
-    /* 阶段1: 强制等待10秒, 让变频器完成自检 */
-    vTaskDelay(pdMS_TO_TICKS(INV_SELFTEST_MIN_SEC * 1000));
-
-    /* 阶段2: 轮询确认变频器就绪 */
-    for (int i = INV_SELFTEST_MIN_SEC; i < INV_READY_TIMEOUT_SEC; i++) {
-        if (BSP_Inverter_ReadStatus(&st)) {
-            if (st.fault_stop == 0) {
-                char msg[60];
-                sprintf(msg, "[INV] Ready after %ds, STS:0x%04X\r\n", i, st.status);
-                BSP_RS485_SendString(msg);
-                return true;
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-    BSP_RS485_SendString("[INV] Timeout! Not ready after 30s\r\n");
-    return false;
+    BSP_RS485_SendString("[INV] Waiting for self-test (10s)...\r\n");
+    vTaskDelay(pdMS_TO_TICKS(INV_SELFTEST_SEC * 1000));
+    BSP_RS485_SendString("[INV] Self-test done, ready\r\n");
+    return true;
 }
 
 /* --- 压缩机启动 (通过变频器, 初始频率120Hz) --- */
@@ -107,59 +89,28 @@ static void Compressor_SetFreq(float freq_hz)
 }
 
 /* --- 读取VAC相序状态 ---
- * 通过 A150 变频器的故障码判断:
- *   fault_stop Bit7 = 输出缺相-30
- * 返回: true = 相序正常, false = 错相/断相
+ * 老师变频板暂无故障码回读, 默认返回正常
+ * 后续如果变频板增加上行状态帧, 在此解析
  */
 static bool VAC_PhaseOK(void)
 {
-    /* A150 故障码 Bit7 = 输出缺相 */
-    if (g_InvStatus.comm_ok && (g_InvStatus.fault_stop & (1U << 7))) {
-        return false;  /* 缺相故障 */
-    }
-    return true;
+    return true;  /* 暂无故障检测, 默认正常 */
 }
 
 /* --- 读取变频器过流状态 ---
- * 通过 A150 变频器的故障码和状态字判断:
- *   fault_stop Bit0 = 硬件过流-33
- *   fault_stop Bit3 = PFC软件过流-37
- *   fault_stop Bit10 = 软件过流-32
- *   status Bit4 = 逆变过流降频状态
- *   status Bit5 = PFC过流降频状态
- * 返回: true = 过流故障, false = 正常
+ * 老师变频板暂无故障码回读, 默认返回正常
  */
 static bool Inverter_IsOvercurrent(void)
 {
-    if (!g_InvStatus.comm_ok) {
-        return false;  /* 通信失败时不误报 */
-    }
-    /* 检查停机级过流故障 */
-    uint16_t overcurr_mask = (1U << 0) | (1U << 3) | (1U << 10);
-    if (g_InvStatus.fault_stop & overcurr_mask) {
-        return true;
-    }
-    return false;
+    return false;  /* 暂无故障检测 */
 }
 
 /* --- 读取变频器过热状态 ---
- * 通过 A150 变频器的故障码和状态字判断:
- *   fault_stop Bit1 = 逆变模块过热-50
- *   fault_stop Bit2 = PFC模块过热-51
- *   status Bit3 = 过热降频状态
- * 返回: true = 过热故障, false = 正常
+ * 老师变频板暂无故障码回读, 默认返回正常
  */
 static bool Inverter_IsOverheat(void)
 {
-    if (!g_InvStatus.comm_ok) {
-        return false;  /* 通信失败时不误报 */
-    }
-    /* 检查停机级过热故障 */
-    uint16_t overheat_mask = (1U << 1) | (1U << 2);
-    if (g_InvStatus.fault_stop & overheat_mask) {
-        return true;
-    }
-    return false;
+    return false;  /* 暂无故障检测 */
 }
 
 /* --- 通知用户 (通过调试串口打印具体报警信息) --- */

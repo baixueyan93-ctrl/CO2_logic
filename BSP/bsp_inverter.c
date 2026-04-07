@@ -4,27 +4,23 @@
 /* ===================================================================
  *  变频器通信驱动 (UART4, PC10=TX, PC11=RX, RS485)
  *
- *  当前适配: A150 S006-3F 通用变频器 (Modbus RTU, 2400bps)
- *  后续切换: 老师自研变频板 (自定义协议) — 只需修改本文件
+ *  适配: 老师自研变频板 (自定义16字节协议, 9600bps)
  *
- *  Modbus RTU 帧格式:
- *    [地址1B][功能码1B][数据nB][CRC16-2B(低位在前)]
+ *  下行帧 (主控→变频板, 16字节):
+ *    [0]  0x55        帧头
+ *    [1]  CMD         0x00=停机, 0x01=启动, 0x02=调频
+ *    [2]  FREQ_LO     频率低字节
+ *    [3]  FREQ_HI     频率高字节
+ *    [4~14] 0x00      保留
+ *    [15] 0x56        帧尾
  *
- *  功能码03 (读保持寄存器):
- *    请求: [Addr][03][RegAddrH][RegAddrL][RegCountH][RegCountL][CRCL][CRCH]
- *    响应: [Addr][03][ByteCount][Data...][CRCL][CRCH]
+ *  上行帧 (变频板→主控, 16字节):
+ *    原样回传, 主控校验是否一致
  *
- *  功能码06 (写单个寄存器):
- *    请求: [Addr][06][RegAddrH][RegAddrL][ValueH][ValueL][CRCL][CRCH]
- *    响应: 原样回传 (echo)
- *
- *  通讯示例 (来自A150规格书):
- *    写70Hz: 01 06 07 CF 00 46 39 73
- *    写0Hz:  01 06 07 CF 00 00 B8 81
- *    读母线: 01 03 08 3C 00 01 46 66
- *
- *  注意: A150 规格书中写频率用的寄存器地址是 0x07CF,
- *        但寄存器表标注是 2000 = 0x07D0。以通讯示例为准, 使用 0x07CF。
+ *  频率编码: 小端序 uint16
+ *    例: 258Hz → [2]=0x02(低), [3]=0x01(高)  (256+2=258)
+ *    例: 120Hz → [2]=0x78(低), [3]=0x00(高)
+ *    例: 320Hz → [2]=0x40(低), [3]=0x01(高)
  * =================================================================== */
 
 /* ===================================================================
@@ -36,36 +32,11 @@ InvStatus_t g_InvStatus = {0};
 /* ===================================================================
  *  内部变量
  * =================================================================== */
-static uint8_t s_tx_buf[INV_TX_MAX_LEN];
-static uint8_t s_rx_buf[INV_RX_MAX_LEN];
-
-/* A150 写频率寄存器地址 — 以规格书通讯示例为准 (0x07CF) */
-#define INV_REG_FREQ_SET_ACTUAL  0x07CF
+static uint8_t s_tx_buf[INV_FRAME_LEN];
+static uint8_t s_rx_buf[INV_FRAME_LEN];
 
 /* ===================================================================
- *  Modbus CRC16 (多项式 0xA001, 标准 Modbus RTU)
- * =================================================================== */
-uint16_t Modbus_CRC16(const uint8_t *data, uint16_t len)
-{
-    uint16_t crc = 0xFFFF;
-    uint16_t i, j;
-
-    for (i = 0; i < len; i++) {
-        crc ^= (uint16_t)data[i];
-        for (j = 0; j < 8; j++) {
-            if (crc & 0x0001) {
-                crc >>= 1;
-                crc ^= 0xA001;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-    return crc;  /* 低字节在前 */
-}
-
-/* ===================================================================
- *  RS485 方向控制
+ *  RS485 方向控制 (PC12)
  * =================================================================== */
 static void RS485_SetTx(void)
 {
@@ -78,140 +49,62 @@ static void RS485_SetRx(void)
 }
 
 /* ===================================================================
- *  Modbus RTU 写单个寄存器 (功能码 0x06)
+ *  组装16字节下行帧
  *
- *  发送: [Addr][06][RegH][RegL][ValH][ValL][CRCL][CRCH]  共8字节
- *  接收: 原样回传 8字节
- *
- *  返回: true=收到正确回传, false=超时或CRC错误
+ *  cmd:     命令字节 (0x00/0x01/0x02)
+ *  freq_hz: 频率值 (Hz), 小端序拆分到 byte[2](低) byte[3](高)
  * =================================================================== */
-static bool Modbus_WriteSingleReg(uint16_t reg_addr, uint16_t value)
+static void BuildFrame(uint8_t cmd, uint16_t freq_hz)
 {
-    uint16_t crc;
+    memset(s_tx_buf, 0x00, INV_FRAME_LEN);
 
-    /* 组帧 */
-    s_tx_buf[0] = INV_MODBUS_ADDR;
-    s_tx_buf[1] = MODBUS_FC_WRITE_SINGLE;
-    s_tx_buf[2] = (uint8_t)(reg_addr >> 8);
-    s_tx_buf[3] = (uint8_t)(reg_addr & 0xFF);
-    s_tx_buf[4] = (uint8_t)(value >> 8);
-    s_tx_buf[5] = (uint8_t)(value & 0xFF);
-
-    crc = Modbus_CRC16(s_tx_buf, 6);
-    s_tx_buf[6] = (uint8_t)(crc & 0xFF);        /* CRC 低字节在前 */
-    s_tx_buf[7] = (uint8_t)((crc >> 8) & 0xFF);
-
-    /* RS485 切换为发送模式 */
-    RS485_SetTx();
-
-    /* 发送 8 字节 */
-    HAL_UART_Transmit(&huart4, s_tx_buf, 8, INV_COMM_TIMEOUT_MS);
-
-    /* 发送完毕, 切回接收模式 */
-    RS485_SetRx();
-
-    /* 等待回传 (A150 回传原样 8 字节) */
-    memset(s_rx_buf, 0, sizeof(s_rx_buf));
-    HAL_StatusTypeDef status = HAL_UART_Receive(&huart4, s_rx_buf, 8,
-                                                 INV_COMM_TIMEOUT_MS);
-
-    if (status != HAL_OK) {
-        InvAckOK = 0;
-        return false;
-    }
-
-    /* 校验 CRC */
-    crc = Modbus_CRC16(s_rx_buf, 6);
-    if (s_rx_buf[6] != (uint8_t)(crc & 0xFF) ||
-        s_rx_buf[7] != (uint8_t)((crc >> 8) & 0xFF)) {
-        InvAckOK = 0;
-        return false;
-    }
-
-    /* 校验回传内容 (应与发送一致) */
-    if (memcmp(s_tx_buf, s_rx_buf, 6) != 0) {
-        InvAckOK = 0;
-        return false;
-    }
-
-    InvAckOK = 1;
-    return true;
+    s_tx_buf[INV_OFS_HEAD]    = INV_FRAME_HEAD;       /* 0x55 */
+    s_tx_buf[INV_OFS_CMD]     = cmd;
+    s_tx_buf[INV_OFS_FREQ_LO] = (uint8_t)(freq_hz & 0xFF);         /* 低字节 */
+    s_tx_buf[INV_OFS_FREQ_HI] = (uint8_t)((freq_hz >> 8) & 0xFF);  /* 高字节 */
+    s_tx_buf[INV_OFS_TAIL]    = INV_FRAME_TAIL;       /* 0x56 */
 }
 
 /* ===================================================================
- *  Modbus RTU 读保持寄存器 (功能码 0x03)
+ *  发送帧并等待echo回传, 校验一致性
  *
- *  发送: [Addr][03][RegH][RegL][CountH][CountL][CRCL][CRCH]  共8字节
- *  接收: [Addr][03][ByteCount][Data...][CRCL][CRCH]
- *        ByteCount = Count * 2
- *        总接收长度 = 3 + ByteCount + 2 = 5 + Count*2
- *
- *  reg_addr: 起始寄存器地址
- *  count:    要读取的寄存器数量
- *  out_data: 输出缓冲区 (至少 count 个 uint16_t)
- *
- *  返回: true=读取成功, false=超时或CRC错误
+ *  返回: true = echo与发送一致, false = 超时或内容不一致
  * =================================================================== */
-static bool Modbus_ReadHoldRegs(uint16_t reg_addr, uint16_t count,
-                                 uint16_t *out_data)
+static bool SendAndVerifyEcho(void)
 {
-    uint16_t crc;
-    uint16_t rx_len = 5 + count * 2;  /* 预期接收总长度 */
-
-    if (rx_len > INV_RX_MAX_LEN) {
-        return false;
-    }
-
-    /* 组帧 */
-    s_tx_buf[0] = INV_MODBUS_ADDR;
-    s_tx_buf[1] = MODBUS_FC_READ_HOLD;
-    s_tx_buf[2] = (uint8_t)(reg_addr >> 8);
-    s_tx_buf[3] = (uint8_t)(reg_addr & 0xFF);
-    s_tx_buf[4] = (uint8_t)(count >> 8);
-    s_tx_buf[5] = (uint8_t)(count & 0xFF);
-
-    crc = Modbus_CRC16(s_tx_buf, 6);
-    s_tx_buf[6] = (uint8_t)(crc & 0xFF);
-    s_tx_buf[7] = (uint8_t)((crc >> 8) & 0xFF);
-
-    /* RS485 切换为发送模式 */
+    /* RS485 切发送模式 */
     RS485_SetTx();
 
-    /* 发送 8 字节 */
-    HAL_UART_Transmit(&huart4, s_tx_buf, 8, INV_COMM_TIMEOUT_MS);
+    /* 发送16字节 */
+    HAL_UART_Transmit(&huart4, s_tx_buf, INV_FRAME_LEN, INV_COMM_TIMEOUT_MS);
 
-    /* 发送完毕, 切回接收模式 */
+    /* 切回接收模式 */
     RS485_SetRx();
 
-    /* 等待回传 */
-    memset(s_rx_buf, 0, sizeof(s_rx_buf));
-    HAL_StatusTypeDef status = HAL_UART_Receive(&huart4, s_rx_buf, rx_len,
+    /* 等待变频板回传16字节 */
+    memset(s_rx_buf, 0, INV_FRAME_LEN);
+    HAL_StatusTypeDef status = HAL_UART_Receive(&huart4, s_rx_buf, INV_FRAME_LEN,
                                                  INV_COMM_TIMEOUT_MS);
 
     if (status != HAL_OK) {
+        InvAckOK = 0;
+        g_InvStatus.echo_ok = false;
+        g_InvStatus.comm_ok = false;
         return false;
     }
 
-    /* 校验: 地址 + 功能码 + 字节数 */
-    if (s_rx_buf[0] != INV_MODBUS_ADDR ||
-        s_rx_buf[1] != MODBUS_FC_READ_HOLD ||
-        s_rx_buf[2] != (uint8_t)(count * 2)) {
+    /* 校验: echo应与发送内容完全一致 */
+    if (memcmp(s_tx_buf, s_rx_buf, INV_FRAME_LEN) != 0) {
+        InvAckOK = 0;
+        g_InvStatus.echo_ok = false;
+        g_InvStatus.comm_ok = false;
         return false;
     }
 
-    /* 校验 CRC */
-    crc = Modbus_CRC16(s_rx_buf, rx_len - 2);
-    if (s_rx_buf[rx_len - 2] != (uint8_t)(crc & 0xFF) ||
-        s_rx_buf[rx_len - 1] != (uint8_t)((crc >> 8) & 0xFF)) {
-        return false;
-    }
-
-    /* 解析数据 (高字节在前) */
-    for (uint16_t i = 0; i < count; i++) {
-        out_data[i] = ((uint16_t)s_rx_buf[3 + i * 2] << 8) |
-                       (uint16_t)s_rx_buf[4 + i * 2];
-    }
-
+    /* echo校验通过 */
+    InvAckOK = 1;
+    g_InvStatus.echo_ok = true;
+    g_InvStatus.comm_ok = true;
     return true;
 }
 
@@ -223,7 +116,7 @@ void BSP_Inverter_Init(void)
     /* RS485 默认为接收模式 */
     RS485_SetRx();
 
-    /* Modbus使用阻塞式收发, 禁用UART4中断防止Overrun错误卡死系统 */
+    /* 使用阻塞式收发, 禁用UART4中断防止Overrun错误 */
     HAL_NVIC_DisableIRQ(UART4_IRQn);
     __HAL_UART_DISABLE_IT(&huart4, UART_IT_RXNE);
     __HAL_UART_DISABLE_IT(&huart4, UART_IT_ERR);
@@ -231,116 +124,64 @@ void BSP_Inverter_Init(void)
     /* 清空状态 */
     InvAckOK = 0;
     memset(&g_InvStatus, 0, sizeof(g_InvStatus));
-
-    /* 配置 A150 频率参数 (规格书默认可能只有0~120Hz)
-     * 压缩机需要 120~320Hz, 必须先设置频率上下限和最大频率
-     * 寄存器地址使用 Modbus地址 = 寄存器号 - 1 */
-    HAL_Delay(500);  /* 等待A150 RS485就绪 */
-    Modbus_WriteSingleReg(INV_REG_FREQ_MAX,   360);  /* 2011: 最大频率=360Hz */
-    HAL_Delay(50);
-    Modbus_WriteSingleReg(INV_REG_FREQ_UPPER, 320);  /* 2009: 频率上限=320Hz */
-    HAL_Delay(50);
-    Modbus_WriteSingleReg(INV_REG_FREQ_LOWER, 120);  /* 2010: 频率下限=120Hz */
-    HAL_Delay(50);
 }
 
 /* ===================================================================
  *  BSP_Inverter_Send — 变频器控制接口
  *
- *  A150 启停逻辑 (规格书 7.2):
- *    频率 > 频率下限(120Hz) → A150自动启动压缩机至目标频率
- *    频率 = 0               → A150停机
- *    A150内部自带升降频速率控制, 不会瞬间跳到目标频率
+ *  组装16字节帧并发送, 等待echo校验
  *
- *  调用方式:
- *    cmd=0x00, freq=0   → 停机 (写频率0)
- *    cmd=0x01, freq=120 → 启动 (写初始频率120Hz)
- *    cmd=0x02, freq=xxx → 调频 (写目标频率, 直接透传)
+ *  cmd:     0x00=停机, 0x01=启动, 0x02=调频
+ *  freq_hz: 目标频率 (Hz)
+ *           停机时 freq_hz=0
+ *           启动时 freq_hz=120 (初始频率)
+ *           调频时 freq_hz=目标值 (120~320)
  * =================================================================== */
 void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
 {
-    uint16_t a150_freq = 0;
-
-    if (cmd == 0x00) {
-        /* 停机: 写频率 0 */
-        a150_freq = 0;
-    } else {
-        /* 直接透传: 系统频率 = A150频率, 不做映射 */
-        a150_freq = freq_hz;
-    }
-
     /* 上限保护 */
-    if (a150_freq > INV_A150_FREQ_MAX) {
-        a150_freq = INV_A150_FREQ_MAX;
+    if (freq_hz > INV_FREQ_ABS_MAX) {
+        freq_hz = INV_FREQ_ABS_MAX;
     }
 
-    /* 通过 Modbus RTU 写频率寄存器 */
-    BSP_Inverter_SetFreqDirect(a150_freq);
+    /* 组帧 */
+    BuildFrame(cmd, freq_hz);
+
+    /* 发送并校验echo */
+    bool ok = SendAndVerifyEcho();
+
+    /* 更新全局状态 */
+    g_InvStatus.last_cmd = cmd;
+    g_InvStatus.last_freq_hz = freq_hz;
+
+    (void)ok;  /* echo失败不阻塞, 上层通过 g_InvStatus.comm_ok 判断 */
 }
 
 /* ===================================================================
- *  直接写 A150 频率寄存器 (0~120Hz)
- *  写0即停机, 写 > 频率下限即启动
- * =================================================================== */
-void BSP_Inverter_SetFreqDirect(uint16_t freq_hz_a150)
-{
-    if (freq_hz_a150 > INV_A150_FREQ_MAX) {
-        freq_hz_a150 = INV_A150_FREQ_MAX;
-    }
-
-    Modbus_WriteSingleReg(INV_REG_FREQ_SET_ACTUAL, freq_hz_a150);
-}
-
-/* ===================================================================
- *  读取变频器状态 (批量读关键寄存器)
+ *  BSP_Inverter_ReadStatus — 读取变频器状态
  *
- *  读取 2100~2113 共14个寄存器, 覆盖:
- *    状态、故障码、转速、电流、电压、温度、功率等
- *
- *  返回: true=读取成功
+ *  老师的变频板暂无主动状态回读功能,
+ *  此函数返回最近一次通信的echo结果, 兼容上层调用
  * =================================================================== */
 bool BSP_Inverter_ReadStatus(InvStatus_t *out)
 {
-    uint16_t regs[14];  /* 2100~2113 */
-
-    if (!Modbus_ReadHoldRegs(INV_READ_START_ADDR, 14, regs)) {
-        if (out) {
-            out->comm_ok = false;
-        }
-        return false;
-    }
-
     if (out) {
-        out->status          = regs[0];   /* 2100: 工作状态 */
-        out->fault_stop      = regs[1];   /* 2101: 停机故障码 */
-        out->fault_warn      = regs[2];   /* 2102: 报警故障码 */
-        out->motor_speed_hz  = regs[3];   /* 2103: 电机转速 */
-        out->out_current_x10 = regs[8];   /* 2108: 输出电流 */
-        out->bus_voltage     = regs[9];   /* 2109: 母线电压 */
-        out->mod_temp        = (int16_t)(regs[10] - 55); /* 2110: 模块温度, 偏移-55 */
-        out->out_power       = 0;         /* 2121 不在本次批量读取范围内 */
-        out->comm_ok         = true;
+        *out = g_InvStatus;
     }
-
-    /* 同步到全局状态 */
-    g_InvStatus = *out;
-    InvAckOK = 1;
-
-    return true;
+    return g_InvStatus.comm_ok;
 }
 
 /* ===================================================================
- *  UART 接收完成回调 (统一回调, 处理多个 UART 实例)
+ *  UART 接收完成回调
  *
- *  UART4  = 变频器 Modbus — 当前使用阻塞式收发, 此回调仅作备用
+ *  UART4  = 变频器 — 当前使用阻塞式收发, 此回调仅作备用
  *  USART1 = RS485 调试串口 — 逐字节中断接收
  * =================================================================== */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == UART4)
     {
-        /* Modbus 当前使用阻塞式收发, 暂不需要中断回调处理 */
-        /* 后续如果改为 DMA/中断方式, 在此处理响应解析 */
+        /* 变频器通信当前使用阻塞式, 暂不需要中断回调 */
     }
     else if (huart->Instance == USART1)
     {
