@@ -133,6 +133,11 @@ void FreqExv_FreqAdjust(void)
         return;
     }
 
+    /* 除霜期间, 频率由除霜任务控制, 这里不干预 */
+    if (sys_bits & ST_DEFROST_ACTIVE) {
+        return;
+    }
+
     /* 等待热车完成 (C20定时器)
      * 老师变频板暂无转速回读, 用定时器等待压缩机稳定到120Hz
      * C20时间由 task_timer 倒计时, 到时设置 ST_TMR_WARMUP_DONE,
@@ -260,6 +265,11 @@ void FreqExv_ExvAdjust(void)
 
     /* 只在压缩机运行时才调整膨胀阀 */
     if (!(sys_bits & ST_COMP_RUNNING)) {
+        return;
+    }
+
+    /* 除霜期间, 膨胀阀由除霜任务控制(全开500步), 这里不干预 */
+    if (sys_bits & ST_DEFROST_ACTIVE) {
         return;
     }
 
