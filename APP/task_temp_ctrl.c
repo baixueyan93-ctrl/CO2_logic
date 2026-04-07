@@ -40,24 +40,37 @@ static void OilHeater_Off(void)
     xEventGroupClearBits(SysEventGroup, ST_OIL_HEAT_ON);
 }
 
-/* --- 等待变频器校准就绪 (轮询状态寄存器, 最多等30秒) --- */
+/* --- 等待变频器自检完成 ---
+ * A150与压缩机上电后有8-10秒自检校准过程,
+ * 必须等自检完成后才能发频率指令,否则压缩机会出问题.
+ *
+ * 策略: 先强制等10秒(自检最少时间), 然后轮询状态确认就绪.
+ *       最多再等20秒, 总计最多30秒.
+ */
+#define INV_SELFTEST_MIN_SEC    10   /* 变频器自检最少等待时间 */
+#define INV_READY_TIMEOUT_SEC   30   /* 总超时时间 */
+
 static bool WaitInverterReady(void)
 {
     InvStatus_t st;
-    BSP_RS485_SendString("[INV] Waiting for inverter ready...\r\n");
-    for (int i = 0; i < 30; i++) {          /* 最多等30秒 */
+    BSP_RS485_SendString("[INV] Waiting for inverter self-test (10s)...\r\n");
+
+    /* 阶段1: 强制等待10秒, 让变频器完成自检 */
+    vTaskDelay(pdMS_TO_TICKS(INV_SELFTEST_MIN_SEC * 1000));
+
+    /* 阶段2: 轮询确认变频器就绪 */
+    for (int i = INV_SELFTEST_MIN_SEC; i < INV_READY_TIMEOUT_SEC; i++) {
         if (BSP_Inverter_ReadStatus(&st)) {
-            /* 通信成功且无停机故障 = 变频器校准完成 */
             if (st.fault_stop == 0) {
                 char msg[60];
-                sprintf(msg, "[INV] Ready after %ds, STS:0x%04X\r\n", i + 1, st.status);
+                sprintf(msg, "[INV] Ready after %ds, STS:0x%04X\r\n", i, st.status);
                 BSP_RS485_SendString(msg);
                 return true;
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));    /* 每秒轮询一次 */
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    BSP_RS485_SendString("[INV] Timeout! Inverter not ready after 30s\r\n");
+    BSP_RS485_SendString("[INV] Timeout! Not ready after 30s\r\n");
     return false;
 }
 
