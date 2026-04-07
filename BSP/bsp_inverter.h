@@ -66,6 +66,7 @@ typedef struct {
     uint8_t  last_cmd;          /* 最后一次发送的命令 */
     bool     echo_ok;           /* 上次发送的echo校验是否通过 */
     bool     comm_ok;           /* 通信是否正常 (echo_ok的别名, 兼容上层) */
+    uint8_t  fail_reason;       /* 失败原因: 0=无, 1=超时无回应, 2=回传不一致 */
     uint16_t motor_speed_hz;    /* 兼容字段, 无实际回读, 暂设为0 */
     uint16_t fault_stop;        /* 兼容字段, 暂设为0 */
     uint16_t fault_warn;        /* 兼容字段, 暂设为0 */

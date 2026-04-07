@@ -196,7 +196,7 @@ void Task_Panel_Process(void const *argument)
                      * 统一走 WaitInverterReady() 等待变频器自检完成后再启动 */
                 } else {
                     BSP_Inverter_Send(0x00, 0);                         /* 关机 */
-                    BSP_RS485_SendString("[KEY] COMP STOP\r\n");
+                    BSP_RS485_SendString("[KEY] Power OFF -> STOP CMD:0x00\r\n");
                     xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
                     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
                     xEventGroupClearBits(SysEventGroup, ST_WARMUP_DONE);  /* 重置热车, 下次开机要重新校准 */

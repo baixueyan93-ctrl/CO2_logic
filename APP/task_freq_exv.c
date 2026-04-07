@@ -66,10 +66,12 @@ static void PID_SetFreq(float freq_hz)
     /* 发送调频指令给变频板 */
     BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
 
-    /* 调试串口打印 */
+    /* 调试串口打印: 当前频率 + echo结果 */
     {
-        char freq_msg[64];
-        sprintf(freq_msg, "[FREQ] %dHz\r\n", (int)freq_hz);
+        char freq_msg[80];
+        sprintf(freq_msg, "[FREQ] %dHz ECHO:%s\r\n",
+                (int)freq_hz,
+                g_InvStatus.echo_ok ? "OK" : "FAIL");
         BSP_RS485_SendString(freq_msg);
     }
 }
@@ -173,6 +175,16 @@ void FreqExv_FreqAdjust(void)
     }
 
     PID_SetFreq(new_freq);
+
+    /* 打印温差和调频方向 */
+    {
+        char dt_msg[80];
+        int step = (int)(new_freq - current_freq);
+        sprintf(dt_msg, "[FREQ] Tc=%.1f Ts=%.1f dT=%.1f %s%dHz/s\r\n",
+                sensor.VAR_CABINET_TEMP, g_set_temp, delta_t,
+                step >= 0 ? "+" : "", step);
+        BSP_RS485_SendString(dt_msg);
+    }
 
     /* 记录温差趋势 */
     s_prev_delta_t = delta_t;
@@ -296,7 +308,15 @@ void FreqExv_ExvAdjust(void)
          *    △TCZ < 目标 → 偏差为负 → Kp增大 → 阀门开大 → 增加流量
          * ============================================================ */
         float tcz_err = delta_tcz - SET_HT_DIFF_TARGET;
+        float old_kp = kp;
         kp = kp - SET_PID_ALPHA1 * tcz_err;
+
+        {
+            char msg[96];
+            sprintf(msg, "[EXV] TCZ=%.1f OUT[%.1f~%.1f] Kp:%.0f->%.0f\r\n",
+                    delta_tcz, tcz_low, tcz_high, old_kp, kp);
+            BSP_RS485_SendString(msg);
+        }
 
         /* 输出Kp */
         EXV_SetOpening(kp);
@@ -333,7 +353,15 @@ void FreqExv_ExvAdjust(void)
          *  → 制冷剂在蒸发器中停留更久 → 充分蒸发 → 过热度升高
          * ============================================================ */
         g_AlarmFlags |= WARN_SUPERHEAT_LOW;
+        float old_kp = kp;
         kp = kp - SET_PID_ALPHA2 * superheat;
+
+        {
+            char msg[96];
+            sprintf(msg, "[EXV] EDT! SH=%.1f<%.1f Kp:%.0f->%.0f\r\n",
+                    superheat, SET_SH_MIN_LOW, old_kp, kp);
+            BSP_RS485_SendString(msg);
+        }
 
     } else {
         /* ============================================================
@@ -343,6 +371,12 @@ void FreqExv_ExvAdjust(void)
          *  传热温差OK + 过热度OK → 系统状态良好, 保持当前开度
          * ============================================================ */
         g_AlarmFlags &= ~WARN_SUPERHEAT_LOW;
+        {
+            char msg[80];
+            sprintf(msg, "[EXV] OK TCZ=%.1f SH=%.1f Kp=%.0f\r\n",
+                    delta_tcz, superheat, kp);
+            BSP_RS485_SendString(msg);
+        }
         return;  /* 无需调整, 不驱动步进电机 */
     }
 
@@ -416,7 +450,10 @@ void Task_FreqExv_Process(void const *argument)
                         g_InvStatus.last_cmd, g_InvStatus.last_freq_hz);
                 BSP_RS485_SendString(msg);
             } else {
-                BSP_RS485_SendString("[INV] ECHO FAIL\r\n");
+                char msg[80];
+                sprintf(msg, "[INV] FAIL reason:%d (1=timeout 2=mismatch)\r\n",
+                        g_InvStatus.fail_reason);
+                BSP_RS485_SendString(msg);
             }
         }
 

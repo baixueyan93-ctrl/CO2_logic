@@ -65,7 +65,13 @@ static void Compressor_Start(void)
     }
     BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
     xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
-    BSP_RS485_SendString("[COMP] Started at 120Hz\r\n");
+    {
+        char msg[80];
+        sprintf(msg, "[COMP] START CMD:0x01 FREQ:%dHz ECHO:%s\r\n",
+                (int)SET_FREQ_INIT,
+                g_InvStatus.echo_ok ? "OK" : "FAIL");
+        BSP_RS485_SendString(msg);
+    }
 }
 
 /* --- 压缩机停止 --- */
@@ -73,6 +79,7 @@ static void Compressor_Stop(void)
 {
     BSP_Inverter_Send(0x00, 0);
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
+    BSP_RS485_SendString("[COMP] STOP CMD:0x00\r\n");
 }
 
 /* --- 设置压缩机频率 --- */
@@ -608,10 +615,19 @@ void TempCtrl_MainLogic(void)
     if (sys_bits & ST_FIRST_RUN) {
         if (!(tmr_bits & ST_TMR_C3_DONE)) {
             /* 通电延迟未到 → 结束, 等待下次循环 */
+            static uint8_t s_c3_print_cnt = 0;
+            if (++s_c3_print_cnt >= 10) {   /* 每10秒打印一次 */
+                s_c3_print_cnt = 0;
+                char msg[64];
+                sprintf(msg, "[SYS] C3 waiting... %ds/%ds\r\n",
+                        (int)g_TimerData.TMR_C3_CNT, SET_POWERON_DLY_C3);
+                BSP_RS485_SendString(msg);
+            }
             return;
         }
         /* C3到时 → 清除首次运行标志, 后续循环不再进入此分支 */
         xEventGroupClearBits(SysEventGroup, ST_FIRST_RUN);
+        BSP_RS485_SendString("[SYS] C3 done, system ready\r\n");
     }
 
     /* ================================================================
@@ -672,10 +688,13 @@ void TempCtrl_MainLogic(void)
 
         /* 是: 停机保护已过 → 柜温 Tc ≥ Ts+C1? */
         if (tc >= g_set_temp + SET_TEMP_HYST_C1) {
-            /* Y → 开启压缩机
-             *   调用子逻辑2(压缩机开机逻辑):
-             *   设置F=120Hz, 启动热车计时C20
-             */
+            /* Y → 开启压缩机 */
+            {
+                char msg[80];
+                sprintf(msg, "[SYS] Tc=%.1f >= Ts+C1=%.1f, starting compressor\r\n",
+                        tc, g_set_temp + SET_TEMP_HYST_C1);
+                BSP_RS485_SendString(msg);
+            }
             TempCtrl_CompressorStart();
 
             /* 复位最短运行时间计时器C8 (从0开始计时) */
@@ -717,13 +736,13 @@ void TempCtrl_MainLogic(void)
              * 此处无需操作, task_freq_exv 自行管理PID周期和热车状态 */
 
         } else {
-            /* N → 温度已降到位(Tc < Ts+C1), 停止运行
-             *
-             *   停机后需要:
-             *   1. 发送停机指令
-             *   2. 复位停机保护计时器C2 (从0开始, 保护期内不允许再启动)
-             *   3. 清除热车完成标志 (下次启动需重新热车)
-             */
+            /* N → 温度已降到位(Tc < Ts+C1), 停止运行 */
+            {
+                char msg[80];
+                sprintf(msg, "[SYS] Tc=%.1f < Ts+C1=%.1f, stopping compressor\r\n",
+                        tc, g_set_temp + SET_TEMP_HYST_C1);
+                BSP_RS485_SendString(msg);
+            }
             Compressor_Stop();
 
             /* 复位停机保护计时器C2 */

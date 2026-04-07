@@ -99,6 +99,7 @@ static bool SendAndVerifyEcho(void)
         InvAckOK = 0;
         g_InvStatus.echo_ok = false;
         g_InvStatus.comm_ok = false;
+        g_InvStatus.fail_reason = 1;  /* 1=超时无回应 */
         return false;
     }
 
@@ -107,6 +108,7 @@ static bool SendAndVerifyEcho(void)
         InvAckOK = 0;
         g_InvStatus.echo_ok = false;
         g_InvStatus.comm_ok = false;
+        g_InvStatus.fail_reason = 2;  /* 2=回传内容不一致 */
         return false;
     }
 
@@ -114,6 +116,7 @@ static bool SendAndVerifyEcho(void)
     InvAckOK = 1;
     g_InvStatus.echo_ok = true;
     g_InvStatus.comm_ok = true;
+    g_InvStatus.fail_reason = 0;
     return true;
 }
 
