@@ -7,6 +7,7 @@
 #include "sys_config.h"
 #include "bsp_relay.h"
 #include "bsp_inverter.h"
+#include "bsp_exv.h"
 #include "bsp_rs485.h"
 #include "task_panel.h"
 #include <stdbool.h>
@@ -65,10 +66,18 @@ static void Compressor_Start(void)
     }
     BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
     xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
+
+    /* 设置EXV初始开度(半开), 避免全关导致制冷剂不流通 */
+    BSP_EXV_SetPosition((uint16_t)SET_EXV_INIT_OPENING, EXV_STEP_DELAY_MS);
+    BSP_EXV_DeEnergize();
+    SysState_Lock();
+    SysState_GetRawPtr()->VAR_EXV_OPENING = SET_EXV_INIT_OPENING;
+    SysState_Unlock();
+
     {
         char msg[80];
-        sprintf(msg, "[COMP] START CMD:0x01 FREQ:%dHz ECHO:%s\r\n",
-                (int)SET_FREQ_INIT,
+        sprintf(msg, "[COMP] START FREQ:%dHz EXV:%d ECHO:%s\r\n",
+                (int)SET_FREQ_INIT, (int)SET_EXV_INIT_OPENING,
                 g_InvStatus.echo_ok ? "OK" : "FAIL");
         BSP_RS485_SendString(msg);
     }

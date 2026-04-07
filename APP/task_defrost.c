@@ -78,6 +78,11 @@ static void Defrost_ValveStep(void)
 {
     BSP_EXV_SetPosition(DEF_EXV_POSITION, EXV_STEP_DELAY_MS);
     BSP_EXV_DeEnergize();
+
+    /* 同步EXV开度到系统状态, 避免除霜结束后PID读到旧值 */
+    SysState_Lock();
+    SysState_GetRawPtr()->VAR_EXV_OPENING = (float)DEF_EXV_POSITION;
+    SysState_Unlock();
 }
 
 /* ===================================================================
@@ -217,6 +222,12 @@ void Defrost_MainProcess(void)
         DefrostHeater_Off();
         Defrost_StopCompressor();
         Defrost_HeatReset();
+
+        /* 恢复风机 (除霜开始时被关闭了) */
+        BSP_Relay_On(RELAY_EVAP_FAN);
+        xEventGroupSetBits(SysEventGroup, ST_EVAP_FAN_ON);
+        BSP_Relay_On(RELAY_COND_FAN);
+        xEventGroupSetBits(SysEventGroup, ST_COND_FAN1_ON);
 
         /* 复位计时器, 重新开始除霜间隔计时 */
         g_TimerData.TMR_DEF_INTV_CNT = 0;
