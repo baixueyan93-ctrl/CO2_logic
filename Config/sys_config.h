@@ -35,7 +35,7 @@
 #define SET_DISCHARGE_PMAX_L    70.0f      /* ����ѹ������-�͵� Pmax (bar)                  */
 #define SET_SUCTION_PMIN        20.0f      /* ����ѹ������ Pmin (bar)                       */
 #define SET_VDC_MIN             300.0f     /* ��Դ��ѹ���� VDCmin (V), ������Ӳ��ȷ��       */
-#define SET_FREQ_INIT           120.0f     /* 压缩机初始频率 (Hz), 直接发120Hz给A150       */
+#define SET_FREQ_INIT           120.0f     /* 压缩机初始频率 (Hz), 启动时发120Hz给变频板   */
 
 /* --- 1.4 �ͿǼ��� --- */
 #define SET_OIL_HEAT_TEMP       10.0f      /* �ͿǼ��ȿ��������¶���ֵ (��10��C ��)       */

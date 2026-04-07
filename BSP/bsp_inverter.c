@@ -78,6 +78,10 @@ static bool SendAndVerifyEcho(void)
     /* 发送16字节 */
     HAL_UART_Transmit(&huart4, s_tx_buf, INV_FRAME_LEN, INV_COMM_TIMEOUT_MS);
 
+    /* 等待移位寄存器发完最后一个字节再切RX
+     * 9600bps下1字节≈1.04ms, 等2ms确保停止位发完 */
+    while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET) {}
+
     /* 切回接收模式 */
     RS485_SetRx();
 
