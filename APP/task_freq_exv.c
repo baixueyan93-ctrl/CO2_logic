@@ -14,75 +14,48 @@
 #include <math.h>
 
 /* ===========================================================================
- * 变频控制(PID)和膨胀阀流程 (逻辑图4) — 实现文件
+ * 变频控制和膨胀阀流程 (逻辑图4) — 实现文件
  *
  * 子逻辑:
- *   1. FreqExv_PidAdjust()     PID调整模块 — 压缩机频率调节
- *   2. FreqExv_ExvAdjust()     膨胀阀调整模块 — 膨胀阀开度(Kp)调节
+ *   1. FreqExv_FreqAdjust()    频率调节 — 每1秒执行, 根据温差调整压缩机频率
+ *   2. FreqExv_ExvAdjust()     膨胀阀调整 — 每30秒执行, 根据过热度调整阀门开度
  *
- * 两个模块每30秒同步执行一次 (PID周期 = SET_PID_PERIOD = 30s)
- *
- * 变频控制原理:
- *   CO2制冷系统通过调节压缩机运转频率来控制制冷量.
- *   柜温高于设定 → 升频加大制冷; 柜温低于设定 → 降频减小制冷.
- *   目标是让柜温稳定在设定温度 ± C1回差带范围内.
+ * 频率调节策略 (老师要求):
+ *   上电 → 3分钟C3延时 → 按键启动 → 8-10秒变频器校准(C20)
+ *   → 从120Hz开始, 每秒调整频率:
+ *     温差 ΔT ≥ 5℃:  +3Hz/s (大温差, 快速升频)
+ *     温差 2℃ ≤ ΔT < 5℃: +2Hz/s (接近目标, 减速)
+ *     温差 0 < ΔT < 2℃:  +1Hz/s (精细调节)
+ *     温差 ΔT ≤ 0:        降频 (柜温已达标)
  *
  * 膨胀阀原理:
  *   电子膨胀阀(EXV)控制制冷剂流量, 影响蒸发器换热效率.
  *   通过传热温差(△TCZ)和过热度(△TP)两个指标来调节阀门开度(Kp).
- *   传热温差反映蒸发器换热效率, 过热度保护压缩机安全.
  * =========================================================================== */
 
 
 /* ===================================================================
- *  内部常量定义
+ *  内部状态变量
  * =================================================================== */
 
-/* --- PID调整模块内部参数 --- */
-#define PID_FREQ_STEP_MAX       20.0f   /* 最大频率调整步长 (Hz/次), 待调参 */
-
-
-/* ===================================================================
- *  内部状态变量 (静态, 跨调用保持)
- * =================================================================== */
-
-/* --- PID模块: 上一次△T, 用于判断"△T缩小" --- */
+/* --- 上一次△T, 用于判断趋势 --- */
 static float s_prev_delta_t = 0.0f;
-static bool  s_prev_dt_valid = false;   /* 首次运行时无上一次数据 */
+static bool  s_prev_dt_valid = false;
+
+/* --- 当前频率跟踪 --- */
+static float s_last_freq = 0.0f;
 
 
 /* ===================================================================
  *  内部辅助函数
  * =================================================================== */
 
-/* --- 启动限速: 每次最多升 20Hz, 降频不限制 --- */
-static float s_last_freq = 0.0f;
-#define RAMP_STEP_MAX  20.0f
-
-/* --- PID自动调频上限 (超过此值需手动按键调频) --- */
-#define PID_AUTO_FREQ_CAP  160.0f
-
-/* --- 设置压缩机频率 (含上下限保护 + 启动限速) --- */
+/* --- 设置压缩机频率 (含上下限保护) --- */
 static void PID_SetFreq(float freq_hz)
 {
-    /* 上限保护 */
-    if (freq_hz > SET_FREQ_MAX) {
-        freq_hz = SET_FREQ_MAX;
-    }
-    /* 下限保护 */
-    if (freq_hz < SET_FREQ_MIN) {
-        freq_hz = SET_FREQ_MIN;
-    }
+    if (freq_hz > SET_FREQ_MAX) freq_hz = SET_FREQ_MAX;
+    if (freq_hz < SET_FREQ_MIN) freq_hz = SET_FREQ_MIN;
 
-    /* PID自动调频上限: 超过160Hz需手动按键调 */
-    if (freq_hz > PID_AUTO_FREQ_CAP) {
-        freq_hz = PID_AUTO_FREQ_CAP;
-    }
-
-    /* 启动限速: 升频每次最多 20Hz, 降频无限制 */
-    if (s_last_freq > 0.0f && freq_hz > s_last_freq + RAMP_STEP_MAX) {
-        freq_hz = s_last_freq + RAMP_STEP_MAX;
-    }
     s_last_freq = freq_hz;
 
     /* 写入全局状态 */
@@ -93,10 +66,10 @@ static void PID_SetFreq(float freq_hz)
     /* 发送调频指令给变频板 */
     BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
 
-    /* 通过调试串口打印当前频率, 方便电脑读取 */
+    /* 调试串口打印 */
     {
         char freq_msg[64];
-        sprintf(freq_msg, "[PID] FREQ:%dHz\r\n", (int)freq_hz);
+        sprintf(freq_msg, "[FREQ] %dHz\r\n", (int)freq_hz);
         BSP_RS485_SendString(freq_msg);
     }
 }
@@ -134,202 +107,83 @@ static void PID_StopCompressor(void)
 
 
 /* ===================================================================
- *  子逻辑1: PID调整模块 (左侧)
+ *  子逻辑1: 频率调节 — 每1秒执行
  *
- *  流程图 (4.变频控制和膨胀阀流程.pdf 左侧):
+ *  根据温差(ΔT = 柜温 - 设定温度)调整压缩机频率:
+ *    ΔT ≥ 5℃:      +3Hz/s  (柜温远高于设定, 快速升频)
+ *    2℃ ≤ ΔT < 5℃: +2Hz/s  (接近目标, 减速)
+ *    0 < ΔT < 2℃:  +1Hz/s  (精细调节)
+ *    -2℃ < ΔT ≤ 0: -1Hz/s  (柜温达标, 缓慢降频)
+ *    -5℃ < ΔT ≤ -2℃: -2Hz/s
+ *    ΔT ≤ -5℃:     -3Hz/s  (过冷, 快速降频)
  *
- *    开始
- *    → 计算 △T = T1 - Ts
- *
- *    → △T ≥ △Tmax?
- *        是 → 最快速升频 → 结束
- *
- *    → △Tmax > △T ≥ △Tmin?
- *        是 → 比例升频 → 结束
- *
- *    → |△T| ≤ △Tmin (在C1回差带内)?
- *        是 → 结束 (维持当前频率, 不调整)
- *
- *    → 否 (△T < -△Tmin, 柜温低于设定):
- *        比例降频
- *        → 记录△T
- *        → △T缩小?
- *            是 → 结束 (趋势良好, 等下次周期)
- *            否 → F ≤ Fmin?
- *                否 → 结束 (频率还没到底, 继续下次降)
- *                是 → ETM报警 → 停机 → 结束
- *
- *  各区间含义:
- *    △T ≥ △Tmax (5℃):  柜温远高于设定, 需要最大制冷力
- *    △Tmin~△Tmax (1~5℃): 柜温偏高, 按偏差比例升频
- *    |△T| ≤ △Tmin (±1℃): 已接近目标, 维持不动 (C1回差带)
- *    △T < -△Tmin:         柜温偏低, 按偏差比例降频
- *    降频后△T不缩小+F到底: 异常, 可能制冷系统故障, 停机保护
- *
- *  调用时机: 每30秒由主循环调用一次
+ *  A150变频器内部自带升降频速率控制(0~60:3rps/s, 60~75:2rps/s, >75:1rps/s)
+ *  所以即使主控板每秒写一次新频率, A150也会平滑过渡
  * =================================================================== */
-void FreqExv_PidAdjust(void)
+void FreqExv_FreqAdjust(void)
 {
-    /* ---- 读取传感器数据 ---- */
     SysVarData_t sensor;
     SysState_GetSensor(&sensor);
 
     EventBits_t sys_bits = xEventGroupGetBits(SysEventGroup);
 
-    /* 只在压缩机运行时才调整频率 */
+    /* 压缩机未运行, 不调频 */
     if (!(sys_bits & ST_COMP_RUNNING)) {
         return;
     }
 
-    /* 热车未完成时不调频, 保持初始频率让压缩机稳定运转
-     * 压缩机启动后需要8-10秒自检+稳定在1200转,
-     * 热车期间保持 SET_FREQ_INIT 不变 */
+    /* 热车未完成(8-10秒校准期), 保持初始频率不动 */
     if (!(sys_bits & ST_WARMUP_DONE)) {
         return;
     }
 
-    /* ================================================================
-     *  第1步: 计算 △T = T1 - Ts
-     *
-     *  T1 = VAR_CABINET_TEMP (柜温, 实测)
-     *  Ts = SET_TEMP_TS (设定目标温度, -20℃)
-     *  △T > 0: 柜温高于设定, 需要加强制冷 (升频)
-     *  △T < 0: 柜温低于设定, 需要减弱制冷 (降频)
-     *  △T ≈ 0: 已达目标, 维持
-     * ================================================================ */
+    /* 计算温差 ΔT = 柜温 - 设定温度 */
     float delta_t = sensor.VAR_CABINET_TEMP - g_set_temp;
-    float current_freq = sensor.VAR_COMP_FREQ;
+    float current_freq = s_last_freq;
+    if (current_freq < SET_FREQ_MIN) {
+        current_freq = SET_FREQ_INIT;  /* 首次调用, 从初始频率开始 */
+    }
     float new_freq = current_freq;
 
-    /* 同步更新 VAR_DELTA_T 供其他模块使用 */
+    /* 同步 VAR_DELTA_T */
     SysState_Lock();
     SysState_GetRawPtr()->VAR_DELTA_T = delta_t;
     SysState_Unlock();
 
-    /* ================================================================
-     *  第2步: △T ≥ △Tmax?
-     *
-     *  △Tmax = SET_DT_MAX = 5℃
-     *  柜温比设定高5℃以上 → 最快速升频
-     *  直接设为最大频率, 全力制冷
-     * ================================================================ */
-    if (delta_t >= SET_DT_MAX) {
-        /* 是 → 最快速升频 */
-        new_freq = SET_FREQ_MAX;
-        PID_SetFreq(new_freq);
-        return;
+    /* ---- 根据温差决定升降频步长 (每秒调一次) ---- */
+    if (delta_t >= 5.0f) {
+        new_freq += 3.0f;          /* 大温差: +3Hz/s */
+    } else if (delta_t >= 2.0f) {
+        new_freq += 2.0f;          /* 中温差: +2Hz/s */
+    } else if (delta_t > 0.0f) {
+        new_freq += 1.0f;          /* 小温差: +1Hz/s */
+    } else if (delta_t > -2.0f) {
+        new_freq -= 1.0f;          /* 稍过冷: -1Hz/s */
+    } else if (delta_t > -5.0f) {
+        new_freq -= 2.0f;          /* 中过冷: -2Hz/s */
+    } else {
+        new_freq -= 3.0f;          /* 大过冷: -3Hz/s */
     }
 
-    /* ================================================================
-     *  第3步: △Tmax > △T ≥ △Tmin?
-     *
-     *  △Tmin = SET_DT_MIN = 1℃
-     *  柜温偏高1~5℃ → 比例升频
-     *  偏差越大升频越多, 线性插值:
-     *    step = PID_FREQ_STEP_MAX × (△T - △Tmin) / (△Tmax - △Tmin)
-     * ================================================================ */
-    if (delta_t >= SET_DT_MIN) {
-        /* 是 → 比例升频 */
-        float ratio = (delta_t - SET_DT_MIN) / (SET_DT_MAX - SET_DT_MIN);
-        float step = PID_FREQ_STEP_MAX * ratio;
-        /* 最少升1Hz, 避免零调整 */
-        if (step < 1.0f) {
-            step = 1.0f;
-        }
-        new_freq = current_freq + step;
-        PID_SetFreq(new_freq);
-        return;
-    }
+    PID_SetFreq(new_freq);
 
-    /* ================================================================
-     *  第4步: |△T| ≤ △Tmin 不是C1?
-     *
-     *  即 |△T| ≤ 1℃ (C1回差带范围内)
-     *  柜温已非常接近设定温度 → 维持当前频率, 不调整
-     * ================================================================ */
-    if (fabsf(delta_t) <= SET_TEMP_HYST_C1) {
-        /* 是 → 结束 (在C1回差带内, 维持) */
-        return;
-    }
-
-    /* ================================================================
-     *  第5步: 比例降频
-     *
-     *  执行到这里说明: △T < -C1, 柜温明显低于设定
-     *  需要降低压缩机频率减少制冷量
-     *
-     *  降频幅度与偏差成正比:
-     *    step = PID_FREQ_STEP_MAX × |△T| / △Tmax
-     * ================================================================ */
-    {
-        float abs_dt = fabsf(delta_t);
-        float ratio = abs_dt / SET_DT_MAX;
-        if (ratio > 1.0f) {
-            ratio = 1.0f;
-        }
-        float step = PID_FREQ_STEP_MAX * ratio;
-        if (step < 1.0f) {
-            step = 1.0f;
-        }
-        new_freq = current_freq - step;
-
-        /* 频率下限保护 (在PID_SetFreq中也有, 这里提前处理便于后续判断) */
-        if (new_freq < SET_FREQ_MIN) {
-            new_freq = SET_FREQ_MIN;
-        }
-        PID_SetFreq(new_freq);
-    }
-
-    /* ================================================================
-     *  第6步: 记录△T
-     *
-     *  保存当前△T, 供下一个PID周期比较
-     * ================================================================ */
-    float prev_dt = s_prev_delta_t;
-    bool  prev_valid = s_prev_dt_valid;
-
+    /* 记录温差趋势 */
     s_prev_delta_t = delta_t;
     s_prev_dt_valid = true;
-
-    /* ================================================================
-     *  第7步: △T缩小?
-     *
-     *  比较当前|△T|与上次|△T|:
-     *    |当前△T| < |上次△T| → 缩小 (趋势在改善)
-     *    否则 → 没缩小 (趋势恶化或停滞)
-     *
-     *  首次运行无上次数据, 默认视为"缩小" (给系统一次调整机会)
-     * ================================================================ */
-    if (!prev_valid || fabsf(delta_t) < fabsf(prev_dt)) {
-        /* 是 → △T在缩小(趋势良好), 标记并结束 */
-        xEventGroupSetBits(SysEventGroup, ST_DT_SHRINKING);
-        return;
-    }
-
-    /* ---- 否 → △T未缩小 ---- */
-    xEventGroupClearBits(SysEventGroup, ST_DT_SHRINKING);
-
-    /* ================================================================
-     *  第8步: F ≤ Fmin?
-     *
-     *  频率已降至最低(20Hz), 且温度偏差没有缩小
-     *  说明制冷系统可能有问题 (制冷量无法减小到匹配柜温)
-     * ================================================================ */
-    if (new_freq <= SET_FREQ_MIN) {
-        /* ---- 是 → ETM报警 → 停机 ----
-         *
-         *  ETM = ERR_TEMP_LOW_STOP: 频率到底温度异常停机
-         *  这是严重错误, 需要停机保护
-         */
-        g_AlarmFlags |= ERR_TEMP_LOW_STOP;
-
-        /* 停机 */
-        PID_StopCompressor();
-
-        /* TODO: 通知用户 (面板显示ETM错误码) */
-    }
-    /* 否 → 频率还没到底, 下次周期继续降频, 结束 */
 }
+
+/* --- 兼容旧接口名, 供外部调用 --- */
+void FreqExv_PidAdjust(void)
+{
+    FreqExv_FreqAdjust();
+}
+
+/* ---- 以下为原PID中的ETM停机保护, 调试阶段暂不启用 ----
+ * 当频率降到最低且温差仍未缩小时, 说明制冷系统异常:
+ *   g_AlarmFlags |= ERR_TEMP_LOW_STOP;
+ *   PID_StopCompressor();
+ * 后续恢复安全保护时取消注释
+ * -------------------------------------------------------- */
 
 
 /* ===================================================================
@@ -501,53 +355,47 @@ void FreqExv_ExvAdjust(void)
  *      1. PID调整模块 (调节压缩机频率)
  *      2. 膨胀阀调整模块 (调节阀门开度)
  *
- *  循环周期: 1秒 (但实际调整每30秒一次)
+ *  循环周期: 1秒
+ *    频率调节: 每1秒执行 (根据温差 +3/+2/+1 Hz)
+ *    膨胀阀:   每30秒执行 (根据过热度调节开度)
+ *    变频器状态轮询: 每5秒读取一次
  * =================================================================== */
 void Task_FreqExv_Process(void const *argument)
 {
     (void)argument;
 
-    /* 初始化: 清除PID相关状态 */
+    /* 初始化 */
     s_prev_delta_t = 0.0f;
     s_prev_dt_valid = false;
+    s_last_freq = 0.0f;
 
-    /* 初始化EXV硬件: GPIO配置 + 关阀归零 */
+    /* 初始化EXV硬件 */
     BSP_EXV_Init();
     BSP_EXV_ResetToZero();
 
     /* 等待系统初始化完成 */
     vTaskDelay(pdMS_TO_TICKS(3000));
 
-    static uint8_t s_inv_poll_cnt = 0;  /* 变频器状态轮询计数 */
+    static uint8_t s_inv_poll_cnt = 0;
 
     for (;;) {
         /* ============================================
-         * 检查PID周期是否到时 (30秒)
-         *   TMR_PID_CNT 由定时中断递增,
-         *   到达 SET_PID_PERIOD(30s) 时置位 ST_TMR_PID_DONE
+         * 每1秒: 频率调节 (根据温差 +3/+2/+1 Hz)
+         * ============================================ */
+        FreqExv_FreqAdjust();
+
+        /* ============================================
+         * 每30秒: 膨胀阀调节 (根据过热度调整开度)
          * ============================================ */
         EventBits_t tmr_bits = xEventGroupGetBits(SysTimerEventGroup);
-
         if (tmr_bits & ST_TMR_PID_DONE) {
-            /* ============================================
-             * PID周期到时, 执行两个子模块
-             * ============================================ */
-
-            /* 子逻辑1: PID调整模块 (调节压缩机频率) */
-            FreqExv_PidAdjust();
-
-            /* 子逻辑2: 膨胀阀调整模块 (调节阀门开度) */
             FreqExv_ExvAdjust();
-
-            /* 复位PID周期计时器, 等待下一个30秒 */
             g_TimerData.TMR_PID_CNT = 0;
             xEventGroupClearBits(SysTimerEventGroup, ST_TMR_PID_DONE);
         }
 
         /* ============================================
-         * 每5秒轮询一次变频器状态 (Modbus读取)
-         *   读取: 运行状态、故障码、实际转速、电流、电压等
-         *   用于: 故障检测、运行监控、调试打印
+         * 每5秒: 轮询变频器状态
          * ============================================ */
         s_inv_poll_cnt++;
         if (s_inv_poll_cnt >= 5) {
@@ -555,7 +403,6 @@ void Task_FreqExv_Process(void const *argument)
 
             InvStatus_t inv_st;
             if (BSP_Inverter_ReadStatus(&inv_st)) {
-                /* 通信成功, 检查变频器故障 */
                 if (inv_st.fault_stop != 0) {
                     g_AlarmFlags |= ERR_INV_OVERCURR;
                     char msg[80];
@@ -567,7 +414,6 @@ void Task_FreqExv_Process(void const *argument)
                     sprintf(msg, "[INV] FAULT WARN: 0x%04X\r\n", inv_st.fault_warn);
                     BSP_RS485_SendString(msg);
                 }
-                /* 调试打印: 实际转速和状态 */
                 {
                     char msg[80];
                     sprintf(msg, "[INV] SPD:%dHz STS:0x%04X I:%d.%dA V:%dV\r\n",
@@ -579,7 +425,6 @@ void Task_FreqExv_Process(void const *argument)
                     BSP_RS485_SendString(msg);
                 }
             } else {
-                /* 通信失败, 打印提示 */
                 BSP_RS485_SendString("[INV] COMM FAIL\r\n");
             }
         }
