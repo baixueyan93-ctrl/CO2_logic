@@ -181,6 +181,13 @@ void FreqExv_PidAdjust(void)
         return;
     }
 
+    /* 热车未完成时不调频, 保持初始频率让压缩机稳定运转
+     * 压缩机启动后需要8-10秒自检+稳定在1200转,
+     * 热车期间保持 SET_FREQ_INIT 不变 */
+    if (!(sys_bits & ST_WARMUP_DONE)) {
+        return;
+    }
+
     /* ================================================================
      *  第1步: 计算 △T = T1 - Ts
      *
@@ -380,6 +387,12 @@ void FreqExv_ExvAdjust(void)
 
     /* 只在压缩机运行时才调整膨胀阀 */
     if (!(sys_bits & ST_COMP_RUNNING)) {
+        return;
+    }
+
+    /* 热车未完成时不调整膨胀阀,
+     * 等压缩机稳定运转后再根据过热度调节 */
+    if (!(sys_bits & ST_WARMUP_DONE)) {
         return;
     }
 
