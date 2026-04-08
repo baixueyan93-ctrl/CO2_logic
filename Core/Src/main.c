@@ -30,6 +30,16 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bsp_inverter.h"
+
+/* >>>>>> 模拟器测试开关 <<<<<<
+ * 取消下面这行的注释 = 启用模拟器测试模式
+ * 注释掉这行 = 正常编译烧录模式
+ */
+// #define SIM_MODE
+
+#ifdef SIM_MODE
+#include "sim_test.h"
+#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -71,7 +81,9 @@ void MX_FREERTOS_Init(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
+#ifdef SIM_MODE
+    SIM_RunTest();  /* 模拟器测试: 跳过所有硬件, 直接测逻辑 */
+#endif
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
