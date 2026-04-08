@@ -141,8 +141,7 @@ function log(msg, color) {
   let ts = String(state.tick).padStart(4,"0");
   let span = document.createElement("span");
   span.style.color = color || "#0f0";
-  span.textContent = "[" + ts + "s] " + msg + "
-";
+  span.textContent = "[" + ts + "s] " + msg + "\n";
   logEl.appendChild(span);
   logEl.scrollTop = logEl.scrollHeight;
 }
