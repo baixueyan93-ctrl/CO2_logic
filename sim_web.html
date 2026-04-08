@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CO2 跨临界制冷系统 模拟器</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: "Microsoft YaHei","SimHei",monospace; background:#1a1a2e; color:#e0e0e0; padding:20px; }
+h1 { text-align:center; color:#00d4ff; margin-bottom:10px; font-size:22px; }
+h2 { color:#00d4ff; font-size:16px; margin:8px 0 6px; border-bottom:1px solid #333; padding-bottom:4px; }
+.container { max-width:1100px; margin:0 auto; }
+.row { display:flex; gap:15px; margin-bottom:12px; flex-wrap:wrap; }
+.col { flex:1; min-width:320px; }
+.card { background:#16213e; border:1px solid #0f3460; border-radius:8px; padding:12px; margin-bottom:12px; }
+label { display:inline-block; width:160px; font-size:13px; color:#aaa; }
+input[type=number] { width:100px; padding:4px 6px; background:#0a0a23; color:#0f0; border:1px solid #444; border-radius:4px; font-family:monospace; font-size:14px; text-align:right; }
+input[type=number]:focus { border-color:#00d4ff; outline:none; }
+button { padding:8px 20px; margin:4px; border:none; border-radius:5px; cursor:pointer; font-size:14px; font-weight:bold; }
+.btn-start { background:#28a745; color:#fff; }
+.btn-start:hover { background:#218838; }
+.btn-stop { background:#dc3545; color:#fff; }
+.btn-stop:hover { background:#c82333; }
+.btn-calc { background:#007bff; color:#fff; }
+.btn-calc:hover { background:#0056b3; }
+.btn-clear { background:#6c757d; color:#fff; }
+.log-box { background:#0a0a23; border:1px solid #333; border-radius:6px; padding:8px; font-family:"Courier New",monospace; font-size:12px; height:300px; overflow-y:auto; white-space:pre; line-height:1.5; color:#0f0; }
+.val-big { font-size:28px; font-weight:bold; color:#0f0; }
+.val-unit { font-size:14px; color:#888; }
+.meter-bar { height:20px; background:#222; border-radius:10px; overflow:hidden; margin:4px 0; }
+.meter-fill { height:100%; border-radius:10px; transition:width 0.3s; }
+.alarm-ok { color:#28a745; font-weight:bold; }
+.alarm-bad { color:#ff4444; font-weight:bold; animation:blink 0.8s infinite; }
+@keyframes blink { 50%{opacity:0.3} }
+.frame-hex { background:#000; color:#0f0; padding:6px 10px; border-radius:4px; font-family:"Courier New",monospace; font-size:13px; margin:4px 0; border-left:3px solid #00d4ff; }
+.frame-label { color:#888; font-size:11px; }
+.status-line { display:flex; align-items:center; gap:10px; margin:3px 0; font-size:13px; }
+.dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.dot-green { background:#28a745; box-shadow:0 0 6px #28a745; }
+.dot-red { background:#dc3545; box-shadow:0 0 6px #dc3545; }
+.dot-gray { background:#555; }
+.dot-yellow { background:#ffc107; box-shadow:0 0 6px #ffc107; }
+.section-title { color:#ffd700; font-size:13px; font-weight:bold; margin:6px 0 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>CO2 跨临界制冷系统 - 模拟器</h1>
+<p style="text-align:center;color:#888;font-size:12px;margin-bottom:15px;">不需要硬件/Keil, 浏览器直接模拟控制逻辑 + RS485通信包</p>
+
+<div class="row">
+<!-- 左列: 输入 + 控制按钮 -->
+<div class="col">
+  <div class="card">
+    <h2>传感器输入</h2>
+    <div class="section-title">温度传感器</div>
+    <div><label>柜温 (C):</label><input type="number" id="in_cabinet" value="10" step="0.5"></div>
+    <div><label>设定温度 (C):</label><input type="number" id="in_settemp" value="-10" step="0.5"></div>
+    <div><label>蒸发器温度 (C):</label><input type="number" id="in_evap" value="-2" step="0.5"></div>
+    <div><label>吸气温度 (C):</label><input type="number" id="in_suction" value="2" step="0.5"></div>
+    <div><label>排气温度 (C):</label><input type="number" id="in_discharge_t" value="80" step="1"></div>
+    <div><label>低压饱和温度 (C):</label><input type="number" id="in_sat_low" value="-8" step="0.5"></div>
+    <div class="section-title">压力传感器</div>
+    <div><label>排气压力 (bar):</label><input type="number" id="in_discharge_p" value="50" step="1"></div>
+    <div><label>吸气压力 (bar):</label><input type="number" id="in_suction_p" value="30" step="1"></div>
+    <div class="section-title">电源</div>
+    <div><label>VDC电压 (V):</label><input type="number" id="in_vdc" value="380" step="10"></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <button class="btn-start" onclick="doStartup()">上电启动</button>
+    <button class="btn-calc" onclick="doOneStep()">单步运行 (1秒)</button>
+    <button class="btn-calc" onclick="doRun30()">运行30秒</button>
+    <button class="btn-stop" onclick="doStop()">停机</button>
+    <button class="btn-clear" onclick="clearLog()">清空日志</button>
+  </div>
+</div>
+
+<!-- 中列: 输出仪表 -->
+<div class="col">
+  <div class="card">
+    <h2>压缩机</h2>
+    <div class="status-line"><span class="dot dot-gray" id="dot_comp"></span><span id="comp_status">未启动</span></div>
+    <div style="margin:8px 0"><span class="val-big" id="out_freq">0</span><span class="val-unit"> Hz</span></div>
+    <div class="meter-bar"><div class="meter-fill" id="bar_freq" style="width:0%;background:linear-gradient(90deg,#00d4ff,#28a745)"></div></div>
+    <div style="font-size:11px;color:#666">120 Hz -------- 220 Hz -------- 320 Hz</div>
+    <div style="margin-top:6px;font-size:13px">
+      <span>温差 dT = <b id="out_dt">0</b> C</span> |
+      <span>步长 = <b id="out_step">0</b> Hz/s</span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>电子膨胀阀 (EXV)</h2>
+    <div style="margin:8px 0"><span class="val-big" id="out_exv">0</span><span class="val-unit"> / 500 步</span></div>
+    <div class="meter-bar"><div class="meter-fill" id="bar_exv" style="width:0%;background:linear-gradient(90deg,#ffc107,#ff5722)"></div></div>
+    <div style="font-size:11px;color:#666">0 (全关) -------------- 500 (全开)</div>
+    <div style="margin-top:6px;font-size:13px">
+      <span>传热温差 = <b id="out_tcz">0</b> C</span> |
+      <span>过热度 = <b id="out_sh">0</b> C</span>
+    </div>
+    <div style="font-size:12px;color:#888;margin-top:2px">动作: <span id="out_exv_action">-</span></div>
+  </div>
+  <div class="card">
+    <h2>报警状态</h2>
+    <div class="status-line"><span id="a_wtm" class="alarm-ok">[正常]</span> WTM 排气温度 (>=110C)</div>
+    <div class="status-line"><span id="a_wph" class="alarm-ok">[正常]</span> WPH 排气压力 (>=70bar)</div>
+    <div class="status-line"><span id="a_wpl" class="alarm-ok">[正常]</span> WPL 吸气压力 (<=20bar)</div>
+    <div class="status-line"><span id="a_edt" class="alarm-ok">[正常]</span> EDT 过热度过低 (<5C)</div>
+    <div class="status-line"><span id="a_edc" class="alarm-ok">[正常]</span> EDC VDC电压 (<300V)</div>
+  </div>
+</div>
+
+<!-- 右列: RS485日志 -->
+<div class="col">
+  <div class="card">
+    <h2>RS485 通信日志 (主控 <-> 变频板)</h2>
+    <div class="log-box" id="logbox"></div>
+  </div>
+</div>
+</div>
+</div>
+
+<script>
+// === 系统参数 ===
+const CFG = {
+  FREQ_MIN: 120, FREQ_MAX: 320, FREQ_INIT: 120,
+  EXV_MAX: 500, EXV_INIT: 250,
+  HT_TARGET: 6.5, HT_LO: 5.0, HT_HI: 8.0,
+  ALPHA1: 0.5, ALPHA2: 0.8, SH_MIN: 5.0,
+  EXHAUST_TMAX: 110, PRES_HIGH: 70, PRES_LOW: 20, VDC_MIN: 300
+};
+
+// === 系统状态 ===
+let state = {
+  running: false, warmup_done: false,
+  freq: 0, exv: 0, tick: 0, pid_cnt: 0
+};
+
+let logEl = document.getElementById("logbox");
+
+// === 日志输出 ===
+function log(msg, color) {
+  let ts = String(state.tick).padStart(4,"0");
+  let span = document.createElement("span");
+  span.style.color = color || "#0f0";
+  span.textContent = "[" + ts + "s] " + msg + "
+";
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// === 构建RS485 16字节帧 (和真实硬件一样) ===
+function buildFrame(cmd, freq_hz) {
+  let frame = new Uint8Array(16);
+  frame[0]  = 0x55;           // 帧头
+  frame[1]  = cmd;            // 命令
+  frame[2]  = freq_hz & 0xFF; // 频率低字节
+  frame[3]  = (freq_hz >> 8) & 0xFF; // 频率高字节
+  // [4~14] = 0x00 保留
+  frame[15] = 0x56;           // 帧尾
+  return frame;
+}
+
+// === 帧转hex字符串 ===
+function frameToHex(frame) {
+  return Array.from(frame).map(b => b.toString(16).toUpperCase().padStart(2,"0")).join(" ");
+}
+
+// === 命令名称 ===
+function cmdName(cmd) {
+  if (cmd === 0x00) return "STOP(停机)";
+  if (cmd === 0x01) return "START(启动)";
+  if (cmd === 0x02) return "SET_FREQ(调频)";
+  return "UNKNOWN";
+}
+
+// === 模拟发送RS485帧 ===
+function simSendFrame(cmd, freq_hz) {
+  let frame = buildFrame(cmd, freq_hz);
+  let hex = frameToHex(frame);
+  log("TX >> 变频板 [" + cmdName(cmd) + "] " + freq_hz + "Hz", "#00d4ff");
+  log("  帧: " + hex, "#00d4ff");
+  log("  解析: HEAD=0x55 CMD=0x" + cmd.toString(16).toUpperCase().padStart(2,"0") +
+      " FREQ=" + freq_hz + "Hz(0x" + frame[2].toString(16).toUpperCase().padStart(2,"0") +
+      " 0x" + frame[3].toString(16).toUpperCase().padStart(2,"0") + ") TAIL=0x56", "#888");
+  // 模拟echo回传
+  log("RX << 变频板 Echo OK (内容一致)", "#28a745");
+  log("  帧: " + hex, "#28a745");
+}
+
+// === 读取输入值 ===
+function getInput(id) { return parseFloat(document.getElementById(id).value) || 0; }
+
+// === 上电启动流程 ===
+function doStartup() {
+  clearLog();
+  state.tick = 0;
+  state.running = false;
+  state.warmup_done = false;
+  state.freq = 0;
+  state.exv = 0;
+  state.pid_cnt = 0;
+
+  let vdc = getInput("in_vdc");
+  log("========== 系统上电 ==========", "#ffd700");
+  log("");
+
+  // 1. 电源检测
+  log("[POWER] 检测VDC电压: " + vdc + "V", "#fff");
+  if (vdc < CFG.VDC_MIN) {
+    log("[ALARM] EDC! VDC=" + vdc + "V < " + CFG.VDC_MIN + "V 电压不足, 启动中止!", "#ff4444");
+    updateAlarm("a_edc", true);
+    updateDisplay();
+    return;
+  }
+  log("[POWER] VDC=" + vdc + "V >= " + CFG.VDC_MIN + "V ... OK", "#28a745");
+  updateAlarm("a_edc", false);
+  log("");
+
+  // 2. RS485初始化
+  log("[RS485] 初始化 UART4 (PC10=TX, PC11=RX)", "#fff");
+  log("[RS485] 参数: 9600bps, 8N1, 半双工", "#fff");
+  log("[RS485] PC12=DIR 设为接收模式", "#fff");
+  log("");
+
+  // 3. EXV复位
+  log("[EXV] 膨胀阀初始化: 步进电机归零", "#fff");
+  log("[EXV] 关闭550步确保全关 (4相: PD8=A+ PD9=B+ PD10=A- PD11=B-)", "#fff");
+  log("[EXV] 相序: A+B+ -> A-B+ -> A-B- -> A+B- (20ms/步)", "#888");
+  log("");
+
+  // 4. 变频器自检
+  log("[INV] 等待变频器自检校准 (10秒)...", "#ffc107");
+  log("[INV] 变频板上电自检中, 请勿发送指令", "#888");
+  state.tick = 10;
+  log("[INV] 自检完成, 变频板就绪", "#28a745");
+  log("");
+
+  // 5. 发送启动指令
+  log("[COMP] 发送启动指令: CMD=0x01, 初始频率=" + CFG.FREQ_INIT + "Hz", "#ffd700");
+  simSendFrame(0x01, CFG.FREQ_INIT);
+  state.freq = CFG.FREQ_INIT;
+  state.running = true;
+  log("");
+
+  // 6. 设置EXV初始开度
+  state.exv = CFG.EXV_INIT;
+  log("[EXV] 设置初始开度: " + CFG.EXV_INIT + "步 (50%开度)", "#ffd700");
+  log("[EXV] 步进电机正转250步, 20ms/步, 共5秒", "#888");
+  log("[EXV] 到位后断电(DeEnergize)省功耗", "#888");
+  log("");
+
+  // 7. 热车
+  log("[WARMUP] 开始热车计时 C20=10秒", "#fff");
+  state.tick = 20;
+  state.warmup_done = true;
+  log("[WARMUP] 热车完成, 开始频率和阀门调节", "#28a745");
+  log("");
+  log("========== 启动完成, 可以单步运行或运行30秒 ==========", "#ffd700");
+
+  updateDisplay();
+}
+
+// === 单步运行 (1秒) ===
+function doOneStep() {
+  if (!state.running) { log("[ERR] 请先点击"上电启动"", "#ff4444"); return; }
+  state.tick++;
+  state.pid_cnt++;
+
+  // 频率调节 (每1秒)
+  let cab = getInput("in_cabinet");
+  let tset = getInput("in_settemp");
+  let dt = cab - tset;
+  let step = 0;
+  if      (dt >= 5)  step = 3;
+  else if (dt >= 2)  step = 2;
+  else if (dt > 0)   step = 1;
+  else if (dt <= -5) step = -3;
+  else if (dt <= -2) step = -2;
+  else if (dt < 0)   step = -1;
+
+  let old_freq = state.freq;
+  state.freq = Math.max(CFG.FREQ_MIN, Math.min(CFG.FREQ_MAX, state.freq + step));
+
+  log("[FREQ] dT=" + dt.toFixed(1) + "C " + (step>=0?"+":"") + step + "Hz/s  " + old_freq.toFixed(0) + "->" + state.freq.toFixed(0) + "Hz", "#fff");
+
+  // 发送调频指令
+  simSendFrame(0x02, Math.round(state.freq));
+
+  // 膨胀阀调节 (每30秒)
+  if (state.pid_cnt >= 30) {
+    state.pid_cnt = 0;
+    doExvAdjust();
+  }
+
+  // 报警检测
+  doAlarmCheck();
+  updateDisplay();
+}
+
+// === 运行30秒 ===
+function doRun30() {
+  if (!state.running) { log("[ERR] 请先点击"上电启动"", "#ff4444"); return; }
+  log("--- 连续运行30秒 ---", "#ffd700");
+  for (let i = 0; i < 30; i++) {
+    doOneStep();
+  }
+  log("--- 30秒运行完成 ---", "#ffd700");
+}
+
+// === 膨胀阀调节 ===
+function doExvAdjust() {
+  let cab = getInput("in_cabinet");
+  let evap = getInput("in_evap");
+  let suct = getInput("in_suction");
+  let sat = getInput("in_sat_low");
+
+  let sh = suct - sat;
+  let tcz = cab - evap;
+  let action = "";
+
+  if (tcz < CFG.HT_LO || tcz > CFG.HT_HI) {
+    let err = tcz - CFG.HT_TARGET;
+    let old = state.exv;
+    state.exv = state.exv - CFG.ALPHA1 * err;
+    action = "传热温差调整";
+    log("[EXV-30s] TCZ=" + tcz.toFixed(1) + " 超出[5.0,8.0] err=" + err.toFixed(1) + " Kp:" + old.toFixed(0) + "->" + state.exv.toFixed(0), "#ffc107");
+  } else if (sh < CFG.SH_MIN) {
+    let old = state.exv;
+    state.exv = state.exv - CFG.ALPHA2 * sh;
+    action = "过热度报警调整";
+    log("[EXV-30s] EDT! SH=" + sh.toFixed(1) + "<" + CFG.SH_MIN + " Kp:" + old.toFixed(0) + "->" + state.exv.toFixed(0), "#ff4444");
+  } else {
+    action = "正常不调整";
+    log("[EXV-30s] OK TCZ=" + tcz.toFixed(1) + " SH=" + sh.toFixed(1) + " Kp=" + state.exv.toFixed(0), "#28a745");
+  }
+
+  state.exv = Math.max(0, Math.min(500, state.exv));
+  document.getElementById("out_exv_action").textContent = action;
+}
+
+// === 报警检测 ===
+function doAlarmCheck() {
+  let dt = getInput("in_discharge_t");
+  let dp = getInput("in_discharge_p");
+  let sp = getInput("in_suction_p");
+  let sh = getInput("in_suction") - getInput("in_sat_low");
+  let vdc = getInput("in_vdc");
+
+  updateAlarm("a_wtm", dt >= CFG.EXHAUST_TMAX);
+  updateAlarm("a_wph", dp >= CFG.PRES_HIGH);
+  updateAlarm("a_wpl", sp <= CFG.PRES_LOW);
+  updateAlarm("a_edt", sh < CFG.SH_MIN);
+  updateAlarm("a_edc", vdc < CFG.VDC_MIN);
+}
+
+function updateAlarm(id, bad) {
+  let el = document.getElementById(id);
+  el.className = bad ? "alarm-bad" : "alarm-ok";
+  el.textContent = bad ? "[!!!报警!!!]" : "[正常]";
+}
+
+// === 停机 ===
+function doStop() {
+  if (!state.running) return;
+  log("", "#fff");
+  log("========== 停机指令 ==========", "#ff4444");
+  simSendFrame(0x00, 0);
+  state.running = false;
+  state.warmup_done = false;
+  state.freq = 0;
+  log("[COMP] 压缩机已停止", "#ff4444");
+  log("[EXV] 膨胀阀保持当前位置: " + state.exv.toFixed(0) + "步", "#888");
+  updateDisplay();
+}
+
+// === 更新显示 ===
+function updateDisplay() {
+  document.getElementById("out_freq").textContent = state.freq.toFixed(0);
+  document.getElementById("out_exv").textContent = state.exv.toFixed(0);
+
+  let freqPct = ((state.freq - 120) / 200) * 100;
+  if (state.freq < 120) freqPct = 0;
+  document.getElementById("bar_freq").style.width = freqPct + "%";
+  document.getElementById("bar_exv").style.width = (state.exv / 500 * 100) + "%";
+
+  let cab = getInput("in_cabinet");
+  let tset = getInput("in_settemp");
+  let evap = getInput("in_evap");
+  let suct = getInput("in_suction");
+  let sat = getInput("in_sat_low");
+  let dt = cab - tset;
+  let sh = suct - sat;
+  let tcz = cab - evap;
+
+  let step = 0;
+  if      (dt >= 5)  step = 3;
+  else if (dt >= 2)  step = 2;
+  else if (dt > 0)   step = 1;
+  else if (dt <= -5) step = -3;
+  else if (dt <= -2) step = -2;
+  else if (dt < 0)   step = -1;
+
+  document.getElementById("out_dt").textContent = dt.toFixed(1);
+  document.getElementById("out_step").textContent = (step>=0?"+":"") + step;
+  document.getElementById("out_tcz").textContent = tcz.toFixed(1);
+  document.getElementById("out_sh").textContent = sh.toFixed(1);
+
+  let dot = document.getElementById("dot_comp");
+  let stxt = document.getElementById("comp_status");
+  if (state.running) {
+    dot.className = "dot dot-green";
+    stxt.textContent = "运行中 (" + state.freq.toFixed(0) + "Hz)";
+    stxt.style.color = "#28a745";
+  } else {
+    dot.className = "dot dot-gray";
+    stxt.textContent = "未启动";
+    stxt.style.color = "#888";
+  }
+}
+
+function clearLog() { logEl.innerHTML = ""; }
+
+// 初始化显示
+updateDisplay();
+</script>
+</body>
+</html>
