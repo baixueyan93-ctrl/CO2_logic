@@ -20,25 +20,25 @@ extern osMutexId EEPROM_MutexHandle;
 static volatile uint8_t s_key_debug = 0;  /* 0=关, 1=开 */
 
 // ==========================================
-// ���ڽ��ջ�����
+// 串口接收缓冲区
 // ==========================================
-uint8_t rx_byte;           // ÿ��ֻ��1���ֽ�
-uint8_t rx_buffer[128];    // �����ַ���������
-uint16_t rx_index = 0;     // ��ǰ�浽�˵ڼ���
-volatile uint8_t rx_complete = 0; // ������ɱ�־ (1��ʾ������)
+uint8_t rx_byte;           // 每次只收1个字节
+uint8_t rx_buffer[128];    // 完整字符串缓冲区
+uint16_t rx_index = 0;     // 当前存到第几个
+volatile uint8_t rx_complete = 0; // 接收完成标志 (1表示已完成)
 
 /* HAL_UART_RxCpltCallback 已统一在 bsp_inverter.c 中,
    UART4 分支处理 RS485 接收逻辑 */
 
 // ==========================================
-// ���ϼ�¼����
+// 故障记录函数
 // ==========================================
 uint8_t System_Record_Fault(uint8_t fault_code) {
     SysLog_t new_log = {0};
     RTC_DateTypeDef sDate;
     RTC_TimeTypeDef sTime;
 
-    // 1. ��ȡ��ǰ�� RTC ʱ���
+    // 1. 获取当前的 RTC 时间戳
     HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
     HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
 
@@ -47,42 +47,42 @@ uint8_t System_Record_Fault(uint8_t fault_code) {
     new_log.EventType = fault_code;
 
     // ==========================================
-    // 2. ��ϵͳ�İ�ȫ�ڰ��ϳ�������������
+    // 2. 从系统的安全拷贝中抓取传感器数据
     // ==========================================
     SysVarData_t current_sensor_data;
     SysState_GetSensor(&current_sensor_data);
 
-    new_log.EvapTemp = current_sensor_data.VAR_EVAP_TEMP;     // 10K �����¶�
-    new_log.CondTemp = current_sensor_data.VAR_EXHAUST_TEMP;  // 50K ����/�����¶� 
+    new_log.EvapTemp = current_sensor_data.VAR_EVAP_TEMP;     // 10K 蒸发温度
+    new_log.CondTemp = current_sensor_data.VAR_EXHAUST_TEMP;  // 50K 排气/冷凝温度
 
-    // 4. ��ȫ����������־��д��
+    // 4. 安全加锁后将日志写入
     if(osMutexWait(EEPROM_MutexHandle, 500) == osOK) {
-        BSP_Log_Add(&new_log); 
-        osMutexRelease(EEPROM_MutexHandle); 
-        return 0; 
+        BSP_Log_Add(&new_log);
+        osMutexRelease(EEPROM_MutexHandle);
+        return 0;
     }
-    return 1; 
+    return 1;
 }
 
 // ==========================================
-// ����������
+// 主任务入口
 // ==========================================
 void Task_RS485Log_Process(void const *argument) {
-    
+
     BSP_RS485_Init();
-    BSP_Log_Init(); 
-    osDelay(100); 
-    
+    BSP_Log_Init();
+    osDelay(100);
+
     BSP_RS485_SendString("\r\n--- Simple Mode Ready! ---\r\n");
-    
-    // ������һ���жϽ��� (ֻ�� 1 ���ֽ�)
+
+    // 启动第一次中断接收 (只收1个字节)
     HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
-    
+
     for(;;) {
-        // ����ж�˵"��ָ������"
+        // 如果判断说"有指令来了"
         if (rx_complete == 1) {
-            
-            // 1. ���� GET ָ��
+
+            // 1. 处理 GET 指令 — 查询全部传感器数据
             if(strstr((char *)rx_buffer, "GET") != NULL) {
     SysVarData_t current_data;
     SysState_GetSensor(&current_data);
@@ -142,77 +142,77 @@ void Task_RS485Log_Process(void const *argument) {
                     BSP_RS485_SendString("KEY debug OFF\r\n");
                 }
 }
-            // 2. ���� TEST ָ��
+            // 2. 处理 TEST 指令 — 写入一条测试日志
             else if(strstr((char *)rx_buffer, "TEST") != NULL) {
                 if(System_Record_Fault(0x99) == 0) BSP_RS485_SendString("Test Saved!\r\n");
             }
-            // 3. ���� READ ָ��Զ�ֻ�����µ� 5 ������� 20 ����
+            // 3. 处理 READ 指令 — 读取最近 5 条故障日志 (环形缓冲区)
             else if(strstr((char *)rx_buffer, "READ") != NULL) {
                 BSP_RS485_SendString("\r\n--- LATEST LOG START ---\r\n");
-                
+
                 if(osMutexWait(EEPROM_MutexHandle, 1000) == osOK) {
                     SysLog_t temp_log;
-                    
-                    // ��ȡ�ײ�"дָ��"�ĵ�ǰλ��
+
+                    // 获取底层"写指针"的当前位置
                     uint8_t current_idx = BSP_Log_Get_Current_Index();
-                    
-                    // Ĭ����ֻ�����µļ�������ʱ�� 5 ��Ϊ��
-                    uint8_t read_count = 5; 
-                    
-                    // �����µ�һ����ʼ����ǰ��
+
+                    // 默认只看最新的几条，暂时以 5 条为例
+                    uint8_t read_count = 5;
+
+                    // 从最新的一条开始，往前读
                     for(int i = 0; i < read_count; i++) {
-                        
-                        // �õ������Ļ����㷨��
-                        // ΪʲôҪ�� LOG_MAX_COUNT����Ϊ��� current_idx �� 0��0-1=-1�ͳ�����
-                        // �������ֵ��ȡ�࣬����������λ��ݣ�0 ����һ���� 126
+
+                        // 环形缓冲区回绕算法:
+                        // 为什么要加 LOG_MAX_COUNT？因为如果 current_idx 是 0，0-1=-1 就超界了
+                        // 加上最大值再取余，保证回绕到末尾 (0 的前一条是 126)
                         int physical_idx = (current_idx - 1 - i + LOG_MAX_COUNT) % LOG_MAX_COUNT;
-                        
-                        BSP_Log_Read_By_Index(physical_idx, &temp_log); 
-                        
-                        // ��ѡ�Ż���������ڳ�����Χ������ 0��˵����������ȫ�µģ���ûд�룩��������
-                        if (temp_log.Year == 0) continue; 
-                        
+
+                        BSP_Log_Read_By_Index(physical_idx, &temp_log);
+
+                        // 可选优化：如果条目Year等于0，说明这条是全新的（还没写入），就跳过
+                        if (temp_log.Year == 0) continue;
+
                         char log_msg[128];
-                        // ��ӡʱ�䡢���ϴ��롢�ڼ��� [Newest - 0], [Newest - 1]
-                        sprintf(log_msg, "[Newest-%d] (Idx:%d) 20%02d-%02d-%02d %02d:%02d:%02d | Evt:0x%02X | Temp:%.1f\r\n", 
+                        // 打印时间、故障代码、第几条 [Newest - 0], [Newest - 1]
+                        sprintf(log_msg, "[Newest-%d] (Idx:%d) 20%02d-%02d-%02d %02d:%02d:%02d | Evt:0x%02X | Temp:%.1f\r\n",
                                 i, physical_idx, temp_log.Year, temp_log.Month, temp_log.Date,
                                 temp_log.Hours, temp_log.Minutes, temp_log.Seconds,
                                 temp_log.EventType, temp_log.EvapTemp);
-                                
+
                         BSP_RS485_SendString(log_msg);
-                        osDelay(10); 
+                        osDelay(10);
                     }
-                    osMutexRelease(EEPROM_MutexHandle); 
+                    osMutexRelease(EEPROM_MutexHandle);
                 }
                 BSP_RS485_SendString("--- LATEST LOG END ---\r\n");
             }
-            // 4. �����޸�ʱ��� SETTIME ָ��
-            // Ԥ�ڸ�ʽ����: SETTIME:26-03-15,14:30:00 (��ʾ 2026��3��15�� 14ʱ30��00��)
+            // 4. 处理 SETTIME 指令 — 修改RTC时间
+            // 预期格式例: SETTIME:26-03-15,14:30:00 (表示 2026年3月15日 14时30分00秒)
             else if(strstr((char *)rx_buffer, "SETTIME") != NULL) {
                 int year, month, date, hour, minute, second;
-                
-                // ʹ�� sscanf ���ַ�������ȡ���ں�ʱ��ֵ
-                if (sscanf((char *)rx_buffer, "SETTIME:%d-%d-%d,%d:%d:%d", 
+
+                // 使用 sscanf 从字符串中提取日期和时间值
+                if (sscanf((char *)rx_buffer, "SETTIME:%d-%d-%d,%d:%d:%d",
                            &year, &month, &date, &hour, &minute, &second) == 6) {
-                    
+
                     RTC_TimeTypeDef sTime = {0};
                     RTC_DateTypeDef sDate = {0};
-                    
-                    // ����ʱ��
+
+                    // 设置时间
                     sTime.Hours = hour;
                     sTime.Minutes = minute;
                     sTime.Seconds = second;
                     sTime.TimeFormat = RTC_HOURFORMAT12_AM;
                     sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
                     sTime.StoreOperation = RTC_STOREOPERATION_RESET;
-                    
-                    // ��������
-                    sDate.WeekDay = RTC_WEEKDAY_MONDAY; // ���ڼ��Լ��㣬Ӱ�첻���ȸ���һ
+
+                    // 设置日期
+                    sDate.WeekDay = RTC_WEEKDAY_MONDAY; // 星期几自己算，影响不大先给周一
                     sDate.Month = month;
                     sDate.Date = date;
                     sDate.Year = year;
-                    
-                    // ��ע�⡿��STM32��Ӳ��Ҫ��������� Time������ Date
+
+                    // 【注意】STM32硬件要求：必须先设 Time，再设 Date
                     if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) == HAL_OK &&
                         HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN) == HAL_OK) {
                         BSP_RS485_SendString("RTC Time Updated Successfully!\r\n");
@@ -220,11 +220,11 @@ void Task_RS485Log_Process(void const *argument) {
                         BSP_RS485_SendString("ERROR: RTC Hardware Fault!\r\n");
                     }
                 } else {
-                    // ����û���ʽд���ˣ���ʾ��ȷ��ʽ
+                    // 如果用户格式写错了，提示正确格式
                     BSP_RS485_SendString("Format Error! Pls use: SETTIME:YY-MM-DD,HH:MM:SS\r\n");
                 }
             }
-						
+
             /* RELAY — 继电器控制
              *   RELAY           → 查询全部继电器状态
              *   RELAY 0 ON      → 打开蒸发风扇(K1)
@@ -280,23 +280,23 @@ void Task_RS485Log_Process(void const *argument) {
                 }
             }
 
-            // ������ϣ���ջ����������¿�ʼ����
+            // 处理完毕，接收缓冲区清空，重新开始接收
             rx_index = 0;
             memset(rx_buffer, 0, sizeof(rx_buffer));
             rx_complete = 0;
             // ==========================================
-            // �������ܲ����Ĵ���Ӳ�������־λ
-            // ��ֹ RS485 �շ��л�˲��ë�̵���оƬ��Ӳ����������
+            // 清理可能残留的串口硬件错误标志位
+            // 防止 RS485 收发切换瞬间毛刺导致芯片出硬件错误
             // ==========================================
-            __HAL_UART_CLEAR_OREFLAG(&huart1); // ���������� (Overrun)
-            __HAL_UART_CLEAR_NEFLAG(&huart1);  // ����������� (Noise)
-            __HAL_UART_CLEAR_FEFLAG(&huart1);  // ���֡���� (Framing)
-            
-            huart1.ErrorCode = HAL_UART_ERROR_NONE; // ǿ��ƭ�� HAL �⣬˵û�д���
-            huart1.RxState = HAL_UART_STATE_READY;  // ǿ�а�״̬�ָ���"׼������"״̬
-            HAL_UART_Receive_IT(&huart1, &rx_byte, 1); 
+            __HAL_UART_CLEAR_OREFLAG(&huart1); // 清溢出错误 (Overrun)
+            __HAL_UART_CLEAR_NEFLAG(&huart1);  // 清噪声错误 (Noise)
+            __HAL_UART_CLEAR_FEFLAG(&huart1);  // 清帧错误 (Framing)
+
+            huart1.ErrorCode = HAL_UART_ERROR_NONE; // 强制清除 HAL 错误状态
+            huart1.RxState = HAL_UART_STATE_READY;  // 强行把状态恢复到"准备接收"
+            HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
         }
-        
+
         /* KEY 调试模式: 持续扫描两个面板的按键并打印 */
         if (s_key_debug) {
             char kmsg[64];
