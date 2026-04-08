@@ -61,10 +61,21 @@ RS485-1,变频器(压缩机控制),B4850,自定义16字节协议,9600bps 8N1,UAR
 RS485-2,调试串口/IoT,B4851,串口文本,9600bps 8N1,USART1 PA9(TX)/PA10(RX)/PA11(DIR) ISO1500隔离
 I2C-1,SHT30温湿度传感器,SHT40接口,I2C,100kHz 地址0x44,PB8(SCL)/PB9(SDA) 柜内温湿度
 I2C-2,24C16 EEPROM,U17,I2C,100kHz 地址0xA0,PB8(SCL)/PB9(SDA) 存储设定参数和日志
-TM1637-1,显示面板(PANEL0),D8,TM1637,CLK+DIO,PB6(CLK)/PB7(DIO) 4位数码管+8图标
-TM1637-2,操作面板(PANEL1),D10,TM1637,CLK+DIO,PB4(CLK)/PB5(DIO) 4位数码管+8图标+8按键
+TM1637-1,显示+按键面板(PANEL0),D8,TM1637,CLK+DIO,PB6(CLK)/PB7(DIO) 4位数码管+8状态图标+4按键
+TM1637-2,显示+按键面板(PANEL1),D10,TM1637,CLK+DIO,PB4(CLK)/PB5(DIO) 4位数码管+8状态图标+4按键
 ,,,,,
-面板按键定义,,,,,
+PANEL0/PANEL1 状态图标(两个面板相同),,,,,
+图标,bit位,显示条件,,,备注说明
+除霜,Bit5 (Def),正在除霜时亮,,,ST_DEFROST_ACTIVE
+加热,Bit3 (Heat),除霜加热阶段亮,,,ST_DEF_HEATING
+风扇,Bit4 (Fan),蒸发风机运行时亮,,,ST_EVAP_FAN_ON
+制冷,Bit7 (Ref),压缩机运行时亮,,,ST_COMP_RUNNING 报警时闪烁
+灯光,Bit1 (Light),照明灯开时亮,,,g_light_on
+设置,Bit2 (Set),设定温度模式时亮,,,g_panel_mode==1
+满水,Bit6 (Humi),液位传感器触发时亮,,,VAR_LIQUID_LEVEL==1
+时钟,Bit0 (Clock),预留,,,暂未使用
+,,,,,
+面板按键定义(调试阶段: 两个4键面板代替一个8键面板),,,,,
 ,,,,,
 PANEL0按键(PB6/PB7),键码,功能,,,备注说明
 K1,0xF7,复位,,,一键复位系统参数
