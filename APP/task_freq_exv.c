@@ -177,9 +177,6 @@ void FreqExv_FreqAdjust(void)
         BSP_RS485_SendString(dt_msg);
     }
 
-    /* 记录温差趋势 */
-    s_prev_delta_t = delta_t;
-    s_prev_dt_valid = true;
 }
 
 /* --- 兼容旧接口名, 供外部调用 --- */
@@ -404,8 +401,6 @@ void Task_FreqExv_Process(void const *argument)
     (void)argument;
 
     /* 初始化 */
-    s_prev_delta_t = 0.0f;
-    s_prev_dt_valid = false;
     s_last_freq = 0.0f;
 
     /* 初始化EXV硬件 */
