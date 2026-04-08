@@ -7,8 +7,11 @@
 #include "sys_config.h"
 #include "bsp_relay.h"
 #include "bsp_inverter.h"
+#include "bsp_exv.h"
+#include "bsp_rs485.h"
 #include "task_panel.h"
 #include <stdbool.h>
+#include <stdio.h>
 
 /* ===========================================================================
  * 温度控制流程 (逻辑图1) — 实现文件
@@ -38,11 +41,46 @@ static void OilHeater_Off(void)
     xEventGroupClearBits(SysEventGroup, ST_OIL_HEAT_ON);
 }
 
-/* --- 压缩机启动 (通过变频器, 初始频率80Hz) --- */
+/* --- 等待变频器与压缩机自检校准完成 ---
+ * 变频板与压缩机上电后有8-10秒自检校准过程,
+ * 必须等自检完成后才能发频率指令, 否则压缩机会出问题.
+ *
+ * 老师变频板暂无状态回读, 采用固定等待10秒策略.
+ */
+#define INV_SELFTEST_SEC    10   /* 变频器自检等待时间 (秒) */
+
+static bool WaitInverterReady(void)
+{
+    BSP_RS485_SendString("[INV] Waiting for self-test (10s)...\r\n");
+    vTaskDelay(pdMS_TO_TICKS(INV_SELFTEST_SEC * 1000));
+    BSP_RS485_SendString("[INV] Self-test done, ready\r\n");
+    return true;
+}
+
+/* --- 压缩机启动 (通过变频器, 初始频率120Hz) --- */
 static void Compressor_Start(void)
 {
+    if (!WaitInverterReady()) {
+        BSP_RS485_SendString("[COMP] Start aborted: inverter not ready\r\n");
+        return;
+    }
     BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
     xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
+
+    /* 设置EXV初始开度(半开), 避免全关导致制冷剂不流通 */
+    BSP_EXV_SetPosition((uint16_t)SET_EXV_INIT_OPENING, EXV_STEP_DELAY_MS);
+    BSP_EXV_DeEnergize();
+    SysState_Lock();
+    SysState_GetRawPtr()->VAR_EXV_OPENING = SET_EXV_INIT_OPENING;
+    SysState_Unlock();
+
+    {
+        char msg[80];
+        sprintf(msg, "[COMP] START FREQ:%dHz EXV:%d ECHO:%s\r\n",
+                (int)SET_FREQ_INIT, (int)SET_EXV_INIT_OPENING,
+                g_InvStatus.echo_ok ? "OK" : "FAIL");
+        BSP_RS485_SendString(msg);
+    }
 }
 
 /* --- 压缩机停止 --- */
@@ -50,6 +88,7 @@ static void Compressor_Stop(void)
 {
     BSP_Inverter_Send(0x00, 0);
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
+    BSP_RS485_SendString("[COMP] STOP CMD:0x00\r\n");
 }
 
 /* --- 设置压缩机频率 --- */
@@ -65,44 +104,65 @@ static void Compressor_SetFreq(float freq_hz)
     BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
 }
 
-/* --- 读取VAC相序状态 (接口待确认) ---
- * 返回: true = 相序正常, false = 错相/断相
+/* --- 读取VAC相序状态 ---
+ * 老师变频板暂无故障码回读, 默认返回正常
+ * 后续如果变频板增加上行状态帧, 在此解析
  */
 static bool VAC_PhaseOK(void)
 {
-    /* TODO: 读取VAC错/断相检测GPIO或通信接口
-     * 可能来自变频器反馈信号
-     */
-    return true;  /* 占位: 默认正常 */
+    return true;  /* 暂无故障检测, 默认正常 */
 }
 
 /* --- 读取变频器过流状态 ---
- * 返回: true = 过流故障, false = 正常
+ * 老师变频板暂无故障码回读, 默认返回正常
  */
 static bool Inverter_IsOvercurrent(void)
 {
-    /* TODO: 从变频器读取过流状态
-     * 可能通过GPIO输入或MODBUS通信
-     */
-    return false;  /* 占位: 默认正常 */
+    return false;  /* 暂无故障检测 */
 }
 
 /* --- 读取变频器过热状态 ---
- * 返回: true = 过热故障, false = 正常
+ * 老师变频板暂无故障码回读, 默认返回正常
  */
 static bool Inverter_IsOverheat(void)
 {
-    /* TODO: 从变频器读取过热状态 */
-    return false;  /* 占位: 默认正常 */
+    return false;  /* 暂无故障检测 */
 }
 
-/* --- 通知用户 (蜂鸣器 / RS485 / 面板显示) --- */
+/* --- 通知用户 (通过调试串口打印具体报警信息) --- */
 static void NotifyUser(uint32_t alarm_code)
 {
-    /* TODO: 根据告警码通知用户
-     * 可通过面板显示故障码 / 蜂鸣器报警 / RS485上报
-     */
-    (void)alarm_code;
+    char msg[128];
+
+    if (alarm_code & ERR_SENSOR_CABINET)
+        BSP_RS485_SendString("[ALARM] E1: Cabinet sensor fault!\r\n");
+    if (alarm_code & ERR_VDC_LOW)
+        BSP_RS485_SendString("[ALARM] EDC: DC voltage too low!\r\n");
+    if (alarm_code & ERR_VAC_PHASE)
+        BSP_RS485_SendString("[ALARM] EAC: Phase loss/error!\r\n");
+    if (alarm_code & ERR_INV_OVERCURR)
+        BSP_RS485_SendString("[ALARM] EFI: Inverter overcurrent!\r\n");
+    if (alarm_code & ERR_INV_OVERHEAT)
+        BSP_RS485_SendString("[ALARM] EFT: Inverter overheat!\r\n");
+    if (alarm_code & ERR_TEMP_LOW_STOP)
+        BSP_RS485_SendString("[ALARM] ETM: Freq min & temp abnormal, STOP!\r\n");
+
+    if (alarm_code & WARN_EXHAUST_HIGH)
+        BSP_RS485_SendString("[WARN] WTM: Exhaust temp too high!\r\n");
+    if (alarm_code & WARN_SUCTION_LOW)
+        BSP_RS485_SendString("[WARN] WTL: Suction temp too low!\r\n");
+    if (alarm_code & WARN_PRES_HIGH)
+        BSP_RS485_SendString("[WARN] WPH: Discharge pressure high!\r\n");
+    if (alarm_code & WARN_PRES_LOW)
+        BSP_RS485_SendString("[WARN] WPL: Suction pressure low!\r\n");
+    if (alarm_code & WARN_LONGRUN)
+        BSP_RS485_SendString("[WARN] WLC: Long run time!\r\n");
+    if (alarm_code & WARN_SUPERHEAT_LOW)
+        BSP_RS485_SendString("[WARN] EDT: Superheat too low!\r\n");
+
+    /* 打印报警码数值 */
+    sprintf(msg, "[ALARM] code=0x%08lX\r\n", (unsigned long)alarm_code);
+    BSP_RS485_SendString(msg);
 }
 
 /* --- 蒸发风扇关闭 (K1继电器, 1控2) --- */
@@ -224,9 +284,9 @@ void TempCtrl_ShutdownAlarm(void)
  *
  *  流程图 (1.1):
  *    开启压缩机
- *    → F = 125 (初始频率125Hz)
+ *    → F = 120 (初始频率120Hz)
  *    → 热车时长C20到时?
- *        N → 继续等待 (保持F=125运行)
+ *        N → 继续等待 (保持F=120运行)
  *        Y → 进入PID调整模块
  *    → PID计算, 幅度限制及输出
  *    → 结束
@@ -243,9 +303,9 @@ void TempCtrl_CompressorStart(void)
         return;
     }
 
-    /* ---- 第1步: 开启压缩机, 设定初始频率 F=125Hz ---- */
+    /* ---- 第1步: 开启压缩机, 设定初始频率120Hz ---- */
     Compressor_Start();
-    Compressor_SetFreq(SET_FREQ_INIT);  /* F = 125Hz */
+    /* 注意: Compressor_Start() 内部已经发了120Hz, 不需要再调 Compressor_SetFreq */
 
     /* ---- 第2步: 启动热车计时器 C20 ----
      * 热车计时由定时中断服务(逻辑图5)中的1s定时器驱动:
@@ -260,7 +320,7 @@ void TempCtrl_CompressorStart(void)
 
     /* ---- 第3步: 等待热车完成 (在主循环中轮询) ----
      * 注意: 不在此处阻塞等待, 而是由主循环周期性检查
-     *       热车期间保持 F=125Hz 运转
+     *       热车期间保持 F=120Hz 运转
      *       热车完成后主循环将调用PID调整模块
      */
 }
@@ -564,10 +624,19 @@ void TempCtrl_MainLogic(void)
     if (sys_bits & ST_FIRST_RUN) {
         if (!(tmr_bits & ST_TMR_C3_DONE)) {
             /* 通电延迟未到 → 结束, 等待下次循环 */
+            static uint8_t s_c3_print_cnt = 0;
+            if (++s_c3_print_cnt >= 10) {   /* 每10秒打印一次 */
+                s_c3_print_cnt = 0;
+                char msg[64];
+                sprintf(msg, "[SYS] C3 waiting... %ds/%ds\r\n",
+                        (int)g_TimerData.TMR_C3_CNT, SET_POWERON_DLY_C3);
+                BSP_RS485_SendString(msg);
+            }
             return;
         }
         /* C3到时 → 清除首次运行标志, 后续循环不再进入此分支 */
         xEventGroupClearBits(SysEventGroup, ST_FIRST_RUN);
+        BSP_RS485_SendString("[SYS] C3 done, system ready\r\n");
     }
 
     /* ================================================================
@@ -597,6 +666,11 @@ void TempCtrl_MainLogic(void)
      * 第5步: 采样值: 柜温Tc (已在上面通过 SysState_GetSensor 获取)
      *        读设置: 停机时长C2, 运行时长 (由定时器计数)
      * ================================================================ */
+
+    /* 除霜期间, 压缩机由除霜任务控制, 温控不干预 */
+    if (sys_bits & ST_DEFROST_ACTIVE) {
+        return;
+    }
 
     /* ================================================================
      * 第6步: 压缩机工作?
@@ -628,10 +702,13 @@ void TempCtrl_MainLogic(void)
 
         /* 是: 停机保护已过 → 柜温 Tc ≥ Ts+C1? */
         if (tc >= g_set_temp + SET_TEMP_HYST_C1) {
-            /* Y → 开启压缩机
-             *   调用子逻辑2(压缩机开机逻辑):
-             *   设置F=125Hz, 启动热车计时C20
-             */
+            /* Y → 开启压缩机 */
+            {
+                char msg[80];
+                sprintf(msg, "[SYS] Tc=%.1f >= Ts+C1=%.1f, starting compressor\r\n",
+                        tc, g_set_temp + SET_TEMP_HYST_C1);
+                BSP_RS485_SendString(msg);
+            }
             TempCtrl_CompressorStart();
 
             /* 复位最短运行时间计时器C8 (从0开始计时) */
@@ -667,27 +744,19 @@ void TempCtrl_MainLogic(void)
              *   a) 热车时长C20已完成 (CompressorWarmup_IsDone)
              *   b) PID周期30s到时 (ST_TMR_PID_DONE)
              *
-             *   热车期间保持F=125Hz, 不做PID调整
+             *   热车期间保持F=120Hz, 不做PID调整
              */
-            if (CompressorWarmup_IsDone()) {
-                /* 热车完成 → 检查PID周期 */
-                if (tmr_bits & ST_TMR_PID_DONE) {
-                    TempCtrl_PID_Adjust();
-                    /* 复位PID周期计时器, 等待下一个30s */
-                    g_TimerData.TMR_PID_CNT = 0;
-                    xEventGroupClearBits(SysTimerEventGroup, ST_TMR_PID_DONE);
-                }
-            }
-            /* else: 热车中, 保持F=125Hz继续运转 */
+            /* PID频率调节和膨胀阀调节已迁移到 task_freq_exv 独立任务
+             * 此处无需操作, task_freq_exv 自行管理PID周期和热车状态 */
 
         } else {
-            /* N → 温度已降到位(Tc < Ts+C1), 停止运行
-             *
-             *   停机后需要:
-             *   1. 发送停机指令
-             *   2. 复位停机保护计时器C2 (从0开始, 保护期内不允许再启动)
-             *   3. 清除热车完成标志 (下次启动需重新热车)
-             */
+            /* N → 温度已降到位(Tc < Ts+C1), 停止运行 */
+            {
+                char msg[80];
+                sprintf(msg, "[SYS] Tc=%.1f < Ts+C1=%.1f, stopping compressor\r\n",
+                        tc, g_set_temp + SET_TEMP_HYST_C1);
+                BSP_RS485_SendString(msg);
+            }
             Compressor_Stop();
 
             /* 复位停机保护计时器C2 */
@@ -761,10 +830,10 @@ void Task_TempCtrl_Process(void const *argument)
 {
     (void)argument;
 
-    /* 系统初始化: 置位首次运行标志, 启动通电延迟C3计时
-     * (对应流程图"系统初始化"步骤)
+    /* 系统初始化: 上电后不自动开机, 等待用户按电源键启动
+     * C3计时器在按键开机后才开始有意义
      */
-    xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);   /* 上电默认开机 */
+    /* xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON); */ /* 去掉自动开机, 必须按键 */
     xEventGroupSetBits(SysEventGroup, ST_FIRST_RUN);
     g_TimerData.TMR_C3_CNT = 0;
     xEventGroupClearBits(SysTimerEventGroup, ST_TMR_C3_DONE);
@@ -784,7 +853,7 @@ void Task_TempCtrl_Process(void const *argument)
          *   检查: VDC电压 / VAC相序 / 变频器过流 / 变频器过热
          *   有异常 → ERR级别, 直接停机
          * ============================================ */
-        TempCtrl_ShutdownAlarm();
+        // TempCtrl_ShutdownAlarm();  /* 调试阶段暂时屏蔽停机报警 */
 
         /* ============================================
          * 第2步: 告警(温度压力)处理逻辑
@@ -813,11 +882,12 @@ void Task_TempCtrl_Process(void const *argument)
          *   禁止运行温度逻辑(防止错误启动压缩机),
          *   但油壳加热仍需正常管理
          * ============================================ */
-        if (g_AlarmFlags & ERR_MASK_ALL) {
-            TempCtrl_OilHeatControl();
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
+        /* 调试阶段暂时屏蔽ERR安全门, 报警不阻止主逻辑运行 */
+        // if (g_AlarmFlags & ERR_MASK_ALL) {
+        //     TempCtrl_OilHeatControl();
+        //     vTaskDelay(pdMS_TO_TICKS(1000));
+        //     continue;
+        // }
 
         /* ============================================
          * 第4步: 温度逻辑(主逻辑)

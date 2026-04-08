@@ -256,7 +256,7 @@ void TimerSvc_TickProcess(void)
      *  扩展第2项: 热车C20到时?
      *
      *  计数器: TMR_WARMUP_CNT
-     *  目标值: SET_WARMUP_C20 = 120秒 (2分钟)
+     *  目标值: SET_WARMUP_C20 = 10秒
      *  标志位: ST_TMR_WARMUP_DONE
      *
      *  用途: 温度控制任务(图1)热车等待
