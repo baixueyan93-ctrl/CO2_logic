@@ -129,6 +129,14 @@ void EvapFan_ModeF1(void)
     bool defrosting  = (sys_bits & ST_DEFROST_ACTIVE) != 0;
     bool comp_on     = (sys_bits & ST_COMP_RUNNING) != 0;
 
+    /* 检测压缩机 停→运行 的跳变, 重启F3延时计时器
+     * 流程图3: 压缩机每次启动后需重新等待F3秒再开风机 */
+    static bool s_prev_comp_on = false;
+    if (comp_on && !s_prev_comp_on) {
+        EvapFan_StartF3Timer();
+    }
+    s_prev_comp_on = comp_on;
+
     /* ================================================================
      *  第1步: 正在除霜?
      * ================================================================ */
@@ -218,6 +226,14 @@ void EvapFan_ModeF2(void)
 
     bool fan_running = (sys_bits & ST_EVAP_FAN_ON) != 0;
     bool defrosting  = (sys_bits & ST_DEFROST_ACTIVE) != 0;
+
+    /* 检测除霜 结束 的跳变, 重启F3延时计时器
+     * 流程图3: 除霜结束后需重新等待F3秒再开风机 */
+    static bool s_prev_defrosting = false;
+    if (!defrosting && s_prev_defrosting) {
+        EvapFan_StartF3Timer();
+    }
+    s_prev_defrosting = defrosting;
 
     /* ================================================================
      *  第1步: 正在除霜?

@@ -444,7 +444,10 @@ void TempCtrl_AlarmProcess(void)
         /* Y → WPH1 置位: 排压超限 */
         g_AlarmFlags |= WARN_PRES_HIGH;
 
-        /* 高压超时? — TMR_PRES_HIGH_CNT 由定时中断每秒递增 */
+        /* 压力超限期间每秒递增 (本函数每1秒调用一次) */
+        g_TimerData.TMR_PRES_HIGH_CNT++;
+
+        /* 高压超时? */
         if (g_TimerData.TMR_PRES_HIGH_CNT >= SET_WARN_PRES_TMO) {
             /* Y → WPH2 置位: 高压持续超时 */
             g_AlarmFlags |= WARN_PRES_HIGH_TMO;
@@ -471,7 +474,10 @@ void TempCtrl_AlarmProcess(void)
         /* Y → WPL1 置位: 吸压过低 */
         g_AlarmFlags |= WARN_PRES_LOW;
 
-        /* 低压超时? — TMR_PRES_LOW_CNT 由定时中断每秒递增 */
+        /* 压力超限期间每秒递增 (本函数每1秒调用一次) */
+        g_TimerData.TMR_PRES_LOW_CNT++;
+
+        /* 低压超时? */
         if (g_TimerData.TMR_PRES_LOW_CNT >= SET_WARN_PRES_TMO) {
             /* Y → WPL2 置位: 低压持续超时 */
             g_AlarmFlags |= WARN_PRES_LOW_TMO;
