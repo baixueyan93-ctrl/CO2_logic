@@ -1,0 +1,6 @@
+# Compiled binaries
+sim_console
+*.o
+*.elf
+*.bin
+*.hex
