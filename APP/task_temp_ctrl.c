@@ -91,19 +91,6 @@ static void Compressor_Stop(void)
     BSP_RS485_SendString("[COMP] STOP CMD:0x00\r\n");
 }
 
-/* --- 设置压缩机频率 --- */
-static void Compressor_SetFreq(float freq_hz)
-{
-    if (freq_hz > SET_FREQ_MAX) freq_hz = SET_FREQ_MAX;
-    if (freq_hz < SET_FREQ_MIN) freq_hz = SET_FREQ_MIN;
-
-    SysState_Lock();
-    SysState_GetRawPtr()->VAR_COMP_FREQ = freq_hz;
-    SysState_Unlock();
-
-    BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
-}
-
 /* --- 读取VAC相序状态 ---
  * 老师变频板暂无故障码回读, 默认返回正常
  * 后续如果变频板增加上行状态帧, 在此解析
@@ -325,21 +312,6 @@ void TempCtrl_CompressorStart(void)
      */
 }
 
-/* --- 热车状态检查 (供主循环调用) ---
- * 返回: true = 热车完成, 可以进入PID; false = 仍在热车中
- */
-static bool CompressorWarmup_IsDone(void)
-{
-    EventBits_t tmr_bits = xEventGroupGetBits(SysTimerEventGroup);
-
-    if (tmr_bits & ST_TMR_WARMUP_DONE) {
-        /* 热车完成, 置位系统状态标志 */
-        xEventGroupSetBits(SysEventGroup, ST_WARMUP_DONE);
-        return true;
-    }
-    return false;
-}
-
 /* --- PID调整模块 (已迁移到逻辑图4) ---
  * 完整PID和膨胀阀调整逻辑已在 task_freq_exv.c 中实现 (逻辑图4).
  * Task_FreqExv 任务每30秒独立执行 PID调整 + 膨胀阀调整.
@@ -349,16 +321,11 @@ static bool CompressorWarmup_IsDone(void)
  *   但实际的PID计算和频率输出已由 FreqExv_PidAdjust() 负责.
  *   此处仅做简单的安全保护检查.
  */
-static void TempCtrl_PID_Adjust(void)
-{
-    /* PID核心逻辑已迁移到 Task_FreqExv (逻辑图4)
-     * 该任务独立以30秒为周期执行:
-     *   FreqExv_PidAdjust()  — 压缩机频率调节
-     *   FreqExv_ExvAdjust()  — 膨胀阀开度调节
-     *
-     * 此处保留: 温控任务仍可在此做快速安全检查
-     */
-}
+/* PID核心逻辑已迁移到 Task_FreqExv (逻辑图4)
+ * 该任务独立以30秒为周期执行:
+ *   FreqExv_PidAdjust()  — 压缩机频率调节
+ *   FreqExv_ExvAdjust()  — 膨胀阀开度调节
+ */
 
 
 /* ===================================================================

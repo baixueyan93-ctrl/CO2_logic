@@ -256,11 +256,11 @@ void Task_RS485Log_Process(void const *argument) {
                     while (*p == ' ') p++;
                     if (strncmp(p, "ON", 2) == 0) {
                         BSP_Relay_On((Relay_ID)id);
-                        sprintf(rmsg, "%s(K%d) → ON\r\n", BSP_Relay_Name((Relay_ID)id), id);
+                        sprintf(rmsg, "%s(K%d) -> ON\r\n", BSP_Relay_Name((Relay_ID)id), id);
                         BSP_RS485_SendString(rmsg);
                     } else if (strncmp(p, "OFF", 3) == 0) {
                         BSP_Relay_Off((Relay_ID)id);
-                        sprintf(rmsg, "%s(K%d) → OFF\r\n", BSP_Relay_Name((Relay_ID)id), id);
+                        sprintf(rmsg, "%s(K%d) -> OFF\r\n", BSP_Relay_Name((Relay_ID)id), id);
                         BSP_RS485_SendString(rmsg);
                     } else {
                         /* 查询单个 */

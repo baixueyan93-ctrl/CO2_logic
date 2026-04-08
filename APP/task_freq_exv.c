@@ -38,10 +38,6 @@
  *  内部状态变量
  * =================================================================== */
 
-/* --- 上一次△T, 用于判断趋势 --- */
-static float s_prev_delta_t = 0.0f;
-static bool  s_prev_dt_valid = false;
-
 /* --- 当前频率跟踪 --- */
 static float s_last_freq = 0.0f;
 
@@ -97,16 +93,6 @@ static void EXV_SetOpening(float kp)
     BSP_EXV_SetPosition((uint16_t)(kp + 0.5f), EXV_STEP_DELAY_MS);
     BSP_EXV_DeEnergize();
 }
-
-/* --- 压缩机停机 (ETM错误时调用) --- */
-static void PID_StopCompressor(void)
-{
-    xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
-    BSP_Inverter_Send(0x00, 0);
-    s_last_freq = 0.0f;  /* 重置限速, 下次启动从低频开始 */
-    BSP_RS485_SendString("[PID] COMP STOP\r\n");
-}
-
 
 /* ===================================================================
  *  子逻辑1: 频率调节 — 每1秒执行
