@@ -24,8 +24,8 @@
  * 三阶段状态机:
  *   [待机阶段] 正常制冷, 等待除霜间隔到时
  *       ↓ 间隔到时(3小时)
- *   [加热阶段] 开启加热器融霜, 监控时间和温度
- *       ↓ 加热超时(45分钟) 或 蒸发器温度≥10℃
+ *   [加热阶段] 停机→等待→阀门→等待→启动压缩机→升频到320Hz→加热
+ *       ↓ 压缩机达320Hz后加热5分钟 或 蒸发器温度≥10℃
  *   [滴水阶段] 关闭加热器, 等待融水滴干
  *       ↓ 滴水超时(5分钟)
  *   [待机阶段] 除霜完成, 复位间隔计时, 恢复制冷
@@ -78,6 +78,11 @@ static void Defrost_ValveStep(void)
 {
     BSP_EXV_SetPosition(DEF_EXV_POSITION, EXV_STEP_DELAY_MS);
     BSP_EXV_DeEnergize();
+
+    /* 同步EXV开度到系统状态, 避免除霜结束后PID读到旧值 */
+    SysState_Lock();
+    SysState_GetRawPtr()->VAR_EXV_OPENING = (float)DEF_EXV_POSITION;
+    SysState_Unlock();
 }
 
 /* ===================================================================
@@ -218,6 +223,12 @@ void Defrost_MainProcess(void)
         Defrost_StopCompressor();
         Defrost_HeatReset();
 
+        /* 恢复风机 (除霜开始时被关闭了) */
+        BSP_Relay_On(RELAY_EVAP_FAN);
+        xEventGroupSetBits(SysEventGroup, ST_EVAP_FAN_ON);
+        BSP_Relay_On(RELAY_COND_FAN);
+        xEventGroupSetBits(SysEventGroup, ST_COND_FAN1_ON);
+
         /* 复位计时器, 重新开始除霜间隔计时 */
         g_TimerData.TMR_DEF_INTV_CNT = 0;
         xEventGroupClearBits(SysTimerEventGroup, ST_TMR_DEF_INTV_DONE);
@@ -244,13 +255,20 @@ void Defrost_MainProcess(void)
          * 此时需要执行完整的除霜启动序列.
          */
         if (!(sys_bits & ST_DEF_HEATING) && !(sys_bits & ST_DEF_DRIPPING)) {
-            /* 手动触发 → 执行与定时触发相同的启动序列 */
+            /* 手动触发 → 执行完整除霜启动序列 */
             Defrost_StopCompressor();
 
             xEventGroupSetBits(SysEventGroup, ST_DEF_HEATING);
 
+            /* 加热计时先清零, 等压缩机升到320Hz后再正式开始计时 */
             g_TimerData.TMR_DEF_DUR_CNT = 0;
             xEventGroupClearBits(SysTimerEventGroup, ST_TMR_DEF_DUR_DONE);
+
+            /* 关闭蒸发风机和冷凝风机 */
+            BSP_Relay_Off(RELAY_EVAP_FAN);
+            xEventGroupClearBits(SysEventGroup, ST_EVAP_FAN_ON);
+            BSP_Relay_Off(RELAY_COND_FAN);
+            xEventGroupClearBits(SysEventGroup, ST_COND_FAN1_ON);
 
             DefrostHeater_On();
             Defrost_HeatReset();
@@ -300,11 +318,13 @@ void Defrost_MainProcess(void)
                 /* 复位加热子程序状态机 (安全保障) */
                 Defrost_HeatReset();
 
-                /* 除霜完成后: 延迟15秒后恢复压缩机
-                 * SET_DEF_COMP_DLY = 15秒
-                 * TODO: 通知温度控制任务可以恢复压缩机
-                 *       (温度控制任务通过检查 ST_DEFROST_ACTIVE 已清除来恢复)
+                /* 除霜结束, 恢复蒸发风机和冷凝风机到除霜前状态
+                 * 蒸发风机: 启动F3延时计时器, 延时30秒后由风机任务自动开启
+                 * 冷凝风机: 清除除霜标志后, 冷凝风机任务检测到压缩机运行会自动开启
+                 * 压缩机: 温控主逻辑检测到 ST_DEFROST_ACTIVE 已清除后自动恢复
                  */
+                g_TimerData.TMR_EVAP_FAN_DLY_CNT = 0;
+                xEventGroupClearBits(SysTimerEventGroup, ST_TMR_EVAP_FAN_DLY);
             }
             /* N → 结束: 滴水时间未到, 继续等待 */
 
@@ -313,16 +333,16 @@ void Defrost_MainProcess(void)
              *  N → 当前处于[加热阶段]
              *
              *  两个退出条件 (任一满足即转入滴水):
-             *    1. 加热时间超时 (SET_DEF_HEAT_MAX = 45分钟)
+             *    1. 加热时间超时 (SET_DEF_HEAT_MAX = 5分钟)
              *    2. 加热温度超值 (蒸发器温度 ≥ SET_DEF_HEAT_TLIMIT = 10℃)
              * ======================================================== */
 
-            /* 每周期驱动加热子程序状态机 (膨胀阀步进 + 压缩机启动) */
+            /* 每周期驱动加热子程序状态机 (膨胀阀步进 + 压缩机升频) */
             Defrost_HeatSubroutine();
 
-            /* ---- 加热时间超时? ---- */
+            /* ---- 加热时间超时? (从压缩机达到320Hz后开始计时) ---- */
             if (tmr_bits & ST_TMR_DEF_DUR_DONE) {
-                /* Y → 加热时间到(45分钟), 无论温度是否达标都转入滴水
+                /* Y → 加热时间到(5分钟), 无论温度是否达标都转入滴水
                  *     (安全保护: 防止加热器长时间工作)
                  */
                 Defrost_TransitionToDrip();
@@ -351,36 +371,31 @@ void Defrost_MainProcess(void)
          * ============================================================ */
 
         if (tmr_bits & ST_TMR_DEF_INTV_DONE) {
-            /* Y → 除霜间隔到时, 开始除霜
-             *
-             * 执行顺序 (严格按流程图):
-             *   1. 标记正在除霜
-             *   2. 标记正在加热
-             *   3. 开启加热计时
-             *   4. 调用加热子程序
-             */
+            /* Y → 除霜间隔到时, 开始除霜 */
 
-            /* 1. 标记正在除霜 — 进入除霜总状态 */
+            /* 1. 标记正在除霜 */
             xEventGroupSetBits(SysEventGroup, ST_DEFROST_ACTIVE);
 
-            /* 通知温控任务: 除霜期间需停止压缩机
-             * (温度控制任务检测到 ST_DEFROST_ACTIVE 后应暂停制冷)
-             */
+            /* 停压缩机 (加热子程序会按流程重新启动并升频) */
             Defrost_StopCompressor();
 
-            /* 2. 标记正在加热 — 进入加热阶段 */
+            /* 2. 标记正在加热 */
             xEventGroupSetBits(SysEventGroup, ST_DEF_HEATING);
 
-            /* 3. 开启加热计时 (从0开始, 计时45分钟) */
+            /* 加热计时先清零, 等压缩机升到320Hz后再正式开始计时 */
             g_TimerData.TMR_DEF_DUR_CNT = 0;
             xEventGroupClearBits(SysTimerEventGroup, ST_TMR_DEF_DUR_DONE);
+
+            /* 关闭蒸发风机和冷凝风机 */
+            BSP_Relay_Off(RELAY_EVAP_FAN);
+            xEventGroupClearBits(SysEventGroup, ST_EVAP_FAN_ON);
+            BSP_Relay_Off(RELAY_COND_FAN);
+            xEventGroupClearBits(SysEventGroup, ST_COND_FAN1_ON);
 
             /* 开启加热器 */
             DefrostHeater_On();
 
-            /* 4. 调用加热子程序
-             * (处理膨胀阀步进 + 延时后开压缩机等启动序列)
-             */
+            /* 调用加热子程序 (处理膨胀阀步进 + 延时后开压缩机 + 升频) */
             Defrost_HeatSubroutine();
         }
 
@@ -520,6 +535,10 @@ void Defrost_HeatSubroutine(void)
         if (s_comp_ramp_freq >= RAMP_TARGET) {
             s_comp_ramp_freq = RAMP_TARGET;
             s_heat_state = HEAT_RUNNING;
+
+            /* 压缩机达到320Hz, 从此刻开始加热10分钟计时 */
+            g_TimerData.TMR_DEF_DUR_CNT = 0;
+            xEventGroupClearBits(SysTimerEventGroup, ST_TMR_DEF_DUR_DONE);
         }
 
         /* 更新压缩机频率并发送给变频板 */
@@ -537,8 +556,8 @@ void Defrost_HeatSubroutine(void)
      *  流程图: "测温度 → 结束"
      *  压缩机已达到目标频率, 加热正常运行,
      *  温度监控和退出判断由主程序 Defrost_MainProcess() 负责:
-     *    - 加热时间超时(45min) → 转入滴水
-     *    - 蒸发器温度≥10℃    → 转入滴水
+     *    - 加热时间超时(5min, 从此刻开始计时) → 转入滴水
+     *    - 蒸发器温度≥10℃ → 转入滴水
      *
      *  此状态下子程序无需额外操作, 仅保持运行
      * ================================================================ */

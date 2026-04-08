@@ -19,7 +19,7 @@
 float   g_set_temp   = SET_TEMP_TS;  /* 用户设定温度, 默认跟随Ts */
 uint8_t g_panel_mode = 0;       /* 0: 正常监控, 1: 温度设置模式 */
 bool    g_light_on   = false;   /* 照明灯状态 */
-bool    g_system_on  = true;    /* 系统电源状态 */
+bool    g_system_on  = false;   /* 系统电源状态, 上电默认关 (需按键开机) */
 
 static uint32_t s_set_mode_tick = 0;
 #define SET_MODE_TIMEOUT_MS  5000   /* 5秒无操作自动退出设置模式 */
@@ -147,9 +147,9 @@ void Task_Panel_Process(void const *argument)
             }
             else {
                 /* 正常模式下: 上/下调频率并发送 (用于调试) */
-                static uint16_t s_test_freq = 80;
-                if (key0 == KEY_CODE_UP)   { s_test_freq += 2; }
-                if (key0 == KEY_CODE_DOWN) { s_test_freq -= 2; }
+                static uint16_t s_test_freq = 160;
+                if (key0 == KEY_CODE_UP)   { s_test_freq += 10; }
+                if (key0 == KEY_CODE_DOWN) { s_test_freq -= 10; }
                 if (s_test_freq > INV_FREQ_MAX) s_test_freq = INV_FREQ_MAX;
                 if (s_test_freq < INV_FREQ_MIN) s_test_freq = INV_FREQ_MIN;
                 BSP_Inverter_Send(0x02, s_test_freq);
@@ -190,13 +190,17 @@ void Task_Panel_Process(void const *argument)
                 g_system_on = !g_system_on;
                 if (g_system_on) {
                     xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
-                    BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);  /* 开机, 初始频率80Hz */
-                    BSP_RS485_SendString("[KEY] COMP START 80Hz\r\n");
+                    BSP_RS485_SendString("[KEY] Power ON\r\n");
+                    /* 不在这里直接发频率指令,
+                     * 由主逻辑 TempCtrl_CompressorStart() → Compressor_Start()
+                     * 统一走 WaitInverterReady() 等待变频器自检完成后再启动 */
                 } else {
                     BSP_Inverter_Send(0x00, 0);                         /* 关机 */
-                    BSP_RS485_SendString("[KEY] COMP STOP\r\n");
+                    BSP_RS485_SendString("[KEY] Power OFF -> STOP CMD:0x00\r\n");
                     xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
                     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
+                    xEventGroupClearBits(SysEventGroup, ST_WARMUP_DONE);  /* 重置热车, 下次开机要重新校准 */
+                    xEventGroupSetBits(SysEventGroup, ST_FIRST_RUN);      /* 重置首次运行, 重新等C3 */
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(150));  /* 消抖 */
