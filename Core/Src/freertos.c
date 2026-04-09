@@ -42,6 +42,7 @@
 #include "task_cond_fan.h"   /* 冷凝风机(1控3)流程 (逻辑图6) */
 #include "bsp_i2c_mutex.h"   /* I2C1 总线互斥锁 */
 #include "bsp_relay.h"       /* 6路继电器驱动 */
+#include "bsp_exv.h"         /* 电子膨胀阀驱动 */
 #include "sys_state.h"       /* 系统状态全局变量 */
 /* USER CODE END Includes */
 
@@ -140,6 +141,8 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_MUTEX */
   BSP_I2C1_MutexInit();  /* 优先初始化硬件互斥锁 */
   BSP_Relay_Init();      /* 继电器GPIO初始化, 上电默认全部OFF */
+  BSP_EXV_Init();        /* 膨胀阀GPIO初始化 (Task_FreqExv暂停时由此处初始化) */
+  BSP_EXV_ResetToZero(); /* 膨胀阀归零 */
   SysState_Init();       /* 在任务启动前初始化全局变量和系统锁 */
   /* USER CODE END RTOS_MUTEX */
 
@@ -194,9 +197,13 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(Task_EvapFan, StartTask_EvapFan, osPriorityNormal, 0, 256);
   Task_EvapFanHandle = osThreadCreate(osThread(Task_EvapFan), NULL);
 
-  /* 变频控制(PID)+电子膨胀阀任务 (逻辑图4, 普通优先级, 512栈) */
-  osThreadDef(Task_FreqExv, StartTask_FreqExv, osPriorityNormal, 0, 512);
-  Task_FreqExvHandle = osThreadCreate(osThread(Task_FreqExv), NULL);
+  /* 变频控制(PID)+电子膨胀阀任务 (逻辑图4) — 暂停创建
+   * 原因: 老师变频板改用ASCII简易协议测试 (INV R/S/0/1/2/3)
+   *       16字节协议任务会与ASCII命令冲突, 测试通过后恢复
+   * 手动控制: 通过RS485发送 "INV R" / "INV S" / "INV 0~3" 命令
+   */
+  /* osThreadDef(Task_FreqExv, StartTask_FreqExv, osPriorityNormal, 0, 512);
+  Task_FreqExvHandle = osThreadCreate(osThread(Task_FreqExv), NULL); */
 
   /* 冷凝风机(1控3)任务 (逻辑图6, 普通优先级, 256栈) */
   osThreadDef(Task_CondFan, StartTask_CondFan, osPriorityNormal, 0, 256);

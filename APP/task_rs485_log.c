@@ -14,6 +14,7 @@
 #include <stdlib.h>
 
 extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart4;
 extern osMutexId EEPROM_MutexHandle;
 
 /* KEY 调试模式标志 */
@@ -278,6 +279,71 @@ void Task_RS485Log_Process(void const *argument) {
                     }
                     BSP_RS485_SendString("====================\r\n");
                 }
+            }
+
+            /* ============================================
+             * INV — 变频器ASCII简易控制 (老师变频板)
+             *
+             * 链路: PC → USART1(RS485) → STM32 → UART4(RS485) → 变频板
+             *
+             * 用法:
+             *   INV R    → 发送 'R' 开机
+             *   INV S    → 发送 'S' 停机
+             *   INV 0    → 发送 '0' 最小速度
+             *   INV 1    → 发送 '1' 最小+阈值1
+             *   INV 2    → 发送 '2' 最小+阈值2
+             *   INV 3    → 发送 '3' 最大速度
+             *
+             * UART4: PC10=TX, PC11=RX, PC12=RS485方向, 9600bps 8N1
+             * ============================================ */
+            else if(strstr((char *)rx_buffer, "INV") != NULL) {
+                char *p = strstr((char *)rx_buffer, "INV") + 3;
+                while (*p == ' ') p++;
+
+                uint8_t cmd_char = *p;
+                const char *desc = "???";
+
+                if (cmd_char == 'R' || cmd_char == 'r') {
+                    cmd_char = 'R'; desc = "START";
+                } else if (cmd_char == 'S' || cmd_char == 's') {
+                    cmd_char = 'S'; desc = "STOP";
+                } else if (cmd_char == '0') {
+                    desc = "SPEED MIN";
+                } else if (cmd_char == '1') {
+                    desc = "SPEED +1";
+                } else if (cmd_char == '2') {
+                    desc = "SPEED +2";
+                } else if (cmd_char == '3') {
+                    desc = "SPEED MAX";
+                } else {
+                    BSP_RS485_SendString("INV usage: INV R/S/0/1/2/3\r\n");
+                    BSP_RS485_SendString("  R=start S=stop 0=min 1/2=mid 3=max\r\n");
+                    goto inv_done;
+                }
+
+                /* UART4 RS485 发送单字节 ASCII 命令给变频板 */
+                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET);   /* PC12=HIGH → TX模式 */
+                HAL_UART_Transmit(&huart4, &cmd_char, 1, 100);
+                while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET) {}
+                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_RESET); /* PC12=LOW → RX模式 */
+
+                /* 尝试接收变频板回传 (100ms超时) */
+                uint8_t rx_inv[16];
+                memset(rx_inv, 0, sizeof(rx_inv));
+                HAL_StatusTypeDef rx_st = HAL_UART_Receive(&huart4, rx_inv, 1, 100);
+
+                {
+                    char imsg[96];
+                    if (rx_st == HAL_OK) {
+                        sprintf(imsg, "[INV] TX:'%c' (%s) → RX:0x%02X('%c') OK\r\n",
+                                cmd_char, desc, rx_inv[0], rx_inv[0]);
+                    } else {
+                        sprintf(imsg, "[INV] TX:'%c' (%s) → RX:timeout (no echo)\r\n",
+                                cmd_char, desc);
+                    }
+                    BSP_RS485_SendString(imsg);
+                }
+inv_done: ;
             }
 
             // 处理完毕，接收缓冲区清空，重新开始接收
