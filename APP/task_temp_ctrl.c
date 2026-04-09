@@ -60,10 +60,9 @@ static bool WaitInverterReady(void)
 /* --- 压缩机启动 (通过变频器, 初始频率120Hz) --- */
 static void Compressor_Start(void)
 {
-    if (!WaitInverterReady()) {
-        BSP_RS485_SendString("[COMP] Start aborted: inverter not ready\r\n");
-        return;
-    }
+    /* WaitInverterReady() 暂停 — 变频板由ASCII手动控制, 无需等自检
+     * if (!WaitInverterReady()) { return; }
+     */
     /* 16字节调频指令暂停, 变频板由XCOM手动发R/S/0~3控制
      * BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
      */
