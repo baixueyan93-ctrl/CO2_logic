@@ -197,13 +197,10 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(Task_EvapFan, StartTask_EvapFan, osPriorityNormal, 0, 256);
   Task_EvapFanHandle = osThreadCreate(osThread(Task_EvapFan), NULL);
 
-  /* 变频控制(PID)+电子膨胀阀任务 (逻辑图4) — 暂停创建
-   * 原因: 老师变频板改用ASCII简易协议测试 (INV R/S/0/1/2/3)
-   *       16字节协议任务会与ASCII命令冲突, 测试通过后恢复
-   * 手动控制: 通过RS485发送 "INV R" / "INV S" / "INV 0~3" 命令
-   */
-  /* osThreadDef(Task_FreqExv, StartTask_FreqExv, osPriorityNormal, 0, 512);
-  Task_FreqExvHandle = osThreadCreate(osThread(Task_FreqExv), NULL); */
+  /* 变频控制(PID)+电子膨胀阀任务 (逻辑图4, 普通优先级, 512栈)
+   * 注: 变频板通信已改为ASCII手动控制(R/S/0~3), PID_SetFreq内16字节发送已禁用 */
+  osThreadDef(Task_FreqExv, StartTask_FreqExv, osPriorityNormal, 0, 512);
+  Task_FreqExvHandle = osThreadCreate(osThread(Task_FreqExv), NULL);
 
   /* 冷凝风机(1控3)任务 (逻辑图6, 普通优先级, 256栈) */
   osThreadDef(Task_CondFan, StartTask_CondFan, osPriorityNormal, 0, 256);

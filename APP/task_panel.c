@@ -152,10 +152,10 @@ void Task_Panel_Process(void const *argument)
                 if (key0 == KEY_CODE_DOWN) { s_test_freq -= 10; }
                 if (s_test_freq > INV_FREQ_MAX) s_test_freq = INV_FREQ_MAX;
                 if (s_test_freq < INV_FREQ_MIN) s_test_freq = INV_FREQ_MIN;
-                BSP_Inverter_Send(0x02, s_test_freq);
+                /* BSP_Inverter_Send(0x02, s_test_freq); — 暂停, 变频板由ASCII手动控制 */
                 {
                     char fm[64];
-                    sprintf(fm, "[KEY] FREQ:%dHz\r\n", s_test_freq);
+                    sprintf(fm, "[KEY] FREQ:%dHz (not sent)\r\n", s_test_freq);
                     BSP_RS485_SendString(fm);
                 }
             }
@@ -195,8 +195,8 @@ void Task_Panel_Process(void const *argument)
                      * 由主逻辑 TempCtrl_CompressorStart() → Compressor_Start()
                      * 统一走 WaitInverterReady() 等待变频器自检完成后再启动 */
                 } else {
-                    BSP_Inverter_Send(0x00, 0);                         /* 关机 */
-                    BSP_RS485_SendString("[KEY] Power OFF -> STOP CMD:0x00\r\n");
+                    /* BSP_Inverter_Send(0x00, 0); — 暂停, 变频板由ASCII手动控制 */
+                    BSP_RS485_SendString("[KEY] Power OFF (manual INV ctrl)\r\n");
                     xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
                     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
                     xEventGroupClearBits(SysEventGroup, ST_WARMUP_DONE);  /* 重置热车, 下次开机要重新校准 */

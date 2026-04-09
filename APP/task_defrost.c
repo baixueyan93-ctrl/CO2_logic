@@ -52,7 +52,7 @@ static void DefrostHeater_Off(void)
  */
 static void Defrost_StopCompressor(void)
 {
-    BSP_Inverter_Send(0x00, 0);
+    /* BSP_Inverter_Send(0x00, 0); — 暂停, 变频板由ASCII手动控制 */
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
 }
 
@@ -64,7 +64,7 @@ static void Defrost_StartCompressor(float freq_hz)
     if (freq_hz > SET_FREQ_MAX) freq_hz = SET_FREQ_MAX;
     if (freq_hz < SET_FREQ_MIN) freq_hz = SET_FREQ_MIN;
 
-    BSP_Inverter_Send(0x01, (uint16_t)freq_hz);
+    /* BSP_Inverter_Send(0x01, (uint16_t)freq_hz); — 暂停, 变频板由ASCII手动控制 */
     xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
     SysState_Lock();
     SysState_GetRawPtr()->VAR_COMP_FREQ = freq_hz;
@@ -562,7 +562,7 @@ void Defrost_HeatSubroutine(void)
         SysState_GetRawPtr()->VAR_COMP_FREQ = s_comp_ramp_freq;
         SysState_Unlock();
 
-        BSP_Inverter_Send(0x02, (uint16_t)s_comp_ramp_freq);
+        /* BSP_Inverter_Send(0x02, (uint16_t)s_comp_ramp_freq); — 暂停 */
         break;
     }
 

@@ -64,7 +64,9 @@ static void Compressor_Start(void)
         BSP_RS485_SendString("[COMP] Start aborted: inverter not ready\r\n");
         return;
     }
-    BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
+    /* 16字节调频指令暂停, 变频板由XCOM手动发R/S/0~3控制
+     * BSP_Inverter_Send(0x01, (uint16_t)SET_FREQ_INIT);
+     */
     xEventGroupSetBits(SysEventGroup, ST_COMP_RUNNING);
 
     /* 设置EXV初始开度(半开), 避免全关导致制冷剂不流通 */
@@ -75,21 +77,17 @@ static void Compressor_Start(void)
     SysState_GetRawPtr()->VAR_EXV_OPENING = SET_EXV_INIT_OPENING;
     SysState_Unlock();
 
-    {
-        char msg[80];
-        sprintf(msg, "[COMP] START FREQ:%dHz EXV:%d ECHO:%s\r\n",
-                (int)SET_FREQ_INIT, (int)SET_EXV_INIT_OPENING,
-                g_InvStatus.echo_ok ? "OK" : "FAIL");
-        BSP_RS485_SendString(msg);
-    }
+    BSP_RS485_SendString("[COMP] START (manual INV ctrl)\r\n");
 }
 
 /* --- 压缩机停止 --- */
 static void Compressor_Stop(void)
 {
-    BSP_Inverter_Send(0x00, 0);
+    /* 16字节停机指令暂停, 变频板由XCOM手动发S控制
+     * BSP_Inverter_Send(0x00, 0);
+     */
     xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
-    BSP_RS485_SendString("[COMP] STOP CMD:0x00\r\n");
+    BSP_RS485_SendString("[COMP] STOP (manual INV ctrl)\r\n");
 }
 
 /* --- 读取VAC相序状态 ---

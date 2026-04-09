@@ -59,15 +59,15 @@ static void PID_SetFreq(float freq_hz)
     SysState_GetRawPtr()->VAR_COMP_FREQ = freq_hz;
     SysState_Unlock();
 
-    /* 发送调频指令给变频板 */
-    BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
+    /* 发送调频指令给变频板 — 暂停(16字节协议与ASCII手动控制冲突)
+     * 当前变频板由XCOM手动发R/S/0~3控制, 恢复后取消注释
+     * BSP_Inverter_Send(0x02, (uint16_t)freq_hz);
+     */
 
-    /* 调试串口打印: 当前频率 + echo结果 */
+    /* 调试串口打印: 当前PID计算频率 */
     {
         char freq_msg[80];
-        sprintf(freq_msg, "[FREQ] %dHz ECHO:%s\r\n",
-                (int)freq_hz,
-                g_InvStatus.echo_ok ? "OK" : "FAIL");
+        sprintf(freq_msg, "[FREQ] %dHz (calc only)\r\n", (int)freq_hz);
         BSP_RS485_SendString(freq_msg);
     }
 }
@@ -429,25 +429,7 @@ void Task_FreqExv_Process(void const *argument)
             xEventGroupClearBits(SysTimerEventGroup, ST_TMR_PID_DONE);
         }
 
-        /* ============================================
-         * 每5秒: 打印变频器通信状态 (老师板子无状态回读)
-         * ============================================ */
-        s_inv_poll_cnt++;
-        if (s_inv_poll_cnt >= 5) {
-            s_inv_poll_cnt = 0;
-
-            if (g_InvStatus.comm_ok) {
-                char msg[80];
-                sprintf(msg, "[INV] OK CMD:%d FREQ:%dHz\r\n",
-                        g_InvStatus.last_cmd, g_InvStatus.last_freq_hz);
-                BSP_RS485_SendString(msg);
-            } else {
-                char msg[80];
-                sprintf(msg, "[INV] FAIL reason:%d (1=timeout 2=mismatch)\r\n",
-                        g_InvStatus.fail_reason);
-                BSP_RS485_SendString(msg);
-            }
-        }
+        /* 变频器通信状态轮询 — 暂停(改用ASCII手动控制, 无状态回读) */
 
         /* 循环延时: 1秒 */
         vTaskDelay(pdMS_TO_TICKS(1000));
