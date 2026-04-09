@@ -69,6 +69,7 @@ static void Compressor_Start(void)
 
     /* 设置EXV初始开度(半开), 避免全关导致制冷剂不流通 */
     BSP_EXV_SetPosition((uint16_t)SET_EXV_INIT_OPENING, EXV_STEP_DELAY_MS);
+    vTaskDelay(pdMS_TO_TICKS(EXV_END_EXCITE_MS));  /* 结束励磁保持 */
     BSP_EXV_DeEnergize();
     SysState_Lock();
     SysState_GetRawPtr()->VAR_EXV_OPENING = SET_EXV_INIT_OPENING;

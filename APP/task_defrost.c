@@ -77,6 +77,7 @@ static void Defrost_StartCompressor(float freq_hz)
 static void Defrost_ValveStep(void)
 {
     BSP_EXV_SetPosition(DEF_EXV_POSITION, EXV_STEP_DELAY_MS);
+    vTaskDelay(pdMS_TO_TICKS(EXV_END_EXCITE_MS));  /* 结束励磁保持 */
     BSP_EXV_DeEnergize();
 
     /* 同步EXV开度到系统状态, 避免除霜结束后PID读到旧值 */

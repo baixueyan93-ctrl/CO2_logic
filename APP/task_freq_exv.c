@@ -91,6 +91,7 @@ static void EXV_SetOpening(float kp)
 
     /* 驱动步进电机到目标位置, 完成后断电省功耗 */
     BSP_EXV_SetPosition((uint16_t)(kp + 0.5f), EXV_STEP_DELAY_MS);
+    vTaskDelay(pdMS_TO_TICKS(EXV_END_EXCITE_MS));  /* 结束励磁保持 */
     BSP_EXV_DeEnergize();
 }
 
