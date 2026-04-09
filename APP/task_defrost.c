@@ -400,20 +400,35 @@ void Defrost_MainProcess(void)
             Defrost_HeatSubroutine();
         }
 
-        /* N → 结束: 除霜间隔未到, 继续等待
+        /* ============================================================
+         *  温差条件提前触发除霜 (流程图2右下角: 温差 + 最短间隔2-3小时)
          *
-         * TODO: 温差条件提前触发除霜
-         *   流程图底部标注: "温差" + "最短间隔时间 2-3小时"
-         *   含义: 即使间隔未到3小时, 如果检测到蒸发器与柜温温差异常大,
-         *         且已过最短间隔(2小时), 也可提前触发除霜
-         *
-         *   实现思路 (待完善):
-         *     float temp_diff = sensor.VAR_CABINET_TEMP - sensor.VAR_EVAP_TEMP;
-         *     if (temp_diff > 某阈值 &&
-         *         g_TimerData.TMR_DEF_INTV_CNT >= SET_DEF_MIN_INTV) {
-         *         // 提前触发除霜
-         *     }
-         */
+         *  即使间隔未到3小时, 如果:
+         *    1. 柜温 - 蒸发温度 > SET_DEF_TEMPDIFF_THR (15℃)
+         *    2. 且已过最短间隔 SET_DEF_MIN_INTV (2小时)
+         *  → 提前触发除霜 (蒸发器可能已严重结霜)
+         * ============================================================ */
+        else if (g_TimerData.TMR_DEF_INTV_CNT >= SET_DEF_MIN_INTV) {
+            float temp_diff = sensor.VAR_CABINET_TEMP - sensor.VAR_EVAP_TEMP;
+
+            if (temp_diff > SET_DEF_TEMPDIFF_THR) {
+                /* 温差过大, 提前触发除霜 */
+                xEventGroupSetBits(SysEventGroup, ST_DEFROST_ACTIVE);
+                Defrost_StopCompressor();
+                xEventGroupSetBits(SysEventGroup, ST_DEF_HEATING);
+
+                g_TimerData.TMR_DEF_DUR_CNT = 0;
+                xEventGroupClearBits(SysTimerEventGroup, ST_TMR_DEF_DUR_DONE);
+
+                BSP_Relay_Off(RELAY_EVAP_FAN);
+                xEventGroupClearBits(SysEventGroup, ST_EVAP_FAN_ON);
+                BSP_Relay_Off(RELAY_COND_FAN);
+                xEventGroupClearBits(SysEventGroup, ST_COND_FAN1_ON);
+
+                DefrostHeater_On();
+                Defrost_HeatSubroutine();
+            }
+        }
     }
 }
 

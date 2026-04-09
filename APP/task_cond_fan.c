@@ -132,10 +132,32 @@ void CondFan_MainProcess(void)
     }
 
     /* ================================================================
-     *  Y → 压缩机运行中 → 直接开风机
+     *  Y → 压缩机运行中 → 温度逻辑控制风机
+     *
+     *  IO表标注: 冷凝温度>35℃开, <25℃关
+     *  当前硬件: 1个继电器K5控3台风机, 只能全开/全关
+     *  控制方式: 温度回差 (hysteresis)
+     *    冷凝温度 ≥ SET_COND_FAN_ON_T  (35℃) → 开启
+     *    冷凝温度 ≤ SET_COND_FAN_OFF_T (25℃) → 关闭
+     *    25~35℃之间 → 保持当前状态 (防止频繁开关)
+     *
+     *  注: 逻辑图6的3路温度阶梯(1台/2台/3台)需要3个独立继电器
+     *      或EC/PWM风机, 当前硬件不支持, 仅做温度回差开关控制
      * ================================================================ */
+    SysVarData_t sensor;
+    SysState_GetSensor(&sensor);
+    float cond_temp = sensor.VAR_COND_TEMP;
+
     if (!fan_on) {
-        CondFan_On();
+        /* 风机未运行 → 温度逻辑: 冷凝温度高于开启阈值才开 */
+        if (cond_temp >= SET_COND_FAN_ON_T) {
+            CondFan_On();
+        }
+    } else {
+        /* 风机已运行 → 冷凝温度降到关闭阈值才关 */
+        if (cond_temp <= SET_COND_FAN_OFF_T) {
+            CondFan_AllOff();
+        }
     }
 }
 
