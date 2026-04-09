@@ -282,26 +282,26 @@ void Task_RS485Log_Process(void const *argument) {
             }
 
             /* ============================================
-             * INV — 变频器ASCII简易控制 (老师变频板)
+             * 变频器ASCII简易控制 (老师变频板)
              *
              * 链路: PC → USART1(RS485) → STM32 → UART4(RS485) → 变频板
              *
-             * 用法:
-             *   INV R    → 发送 'R' 开机
-             *   INV S    → 发送 'S' 停机
-             *   INV 0    → 发送 '0' 最小速度
-             *   INV 1    → 发送 '1' 最小+阈值1
-             *   INV 2    → 发送 '2' 最小+阈值2
-             *   INV 3    → 发送 '3' 最大速度
+             * 直接输入即可:
+             *   R 或 r   → 开机
+             *   S 或 s   → 停机
+             *   0        → 最小速度
+             *   1        → 最小+阈值1
+             *   2        → 最小+阈值2
+             *   3        → 最大速度
              *
              * UART4: PC10=TX, PC11=RX, PC12=RS485方向, 9600bps 8N1
              * ============================================ */
-            else if(strstr((char *)rx_buffer, "INV") != NULL) {
-                char *p = strstr((char *)rx_buffer, "INV") + 3;
+            else {
+                /* 取第一个非空字符 */
+                char *p = (char *)rx_buffer;
                 while (*p == ' ') p++;
-
                 uint8_t cmd_char = *p;
-                const char *desc = "???";
+                const char *desc = NULL;
 
                 if (cmd_char == 'R' || cmd_char == 'r') {
                     cmd_char = 'R'; desc = "START";
@@ -315,35 +315,25 @@ void Task_RS485Log_Process(void const *argument) {
                     desc = "SPEED +2";
                 } else if (cmd_char == '3') {
                     desc = "SPEED MAX";
-                } else {
-                    BSP_RS485_SendString("INV usage: INV R/S/0/1/2/3\r\n");
-                    BSP_RS485_SendString("  R=start S=stop 0=min 1/2=mid 3=max\r\n");
-                    goto inv_done;
                 }
 
-                /* UART4 RS485 发送单字节 ASCII 命令给变频板 */
-                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET);   /* PC12=HIGH → TX模式 */
-                HAL_UART_Transmit(&huart4, &cmd_char, 1, 100);
-                while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET) {}
-                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_RESET); /* PC12=LOW → RX模式 */
+                if (desc != NULL) {
+                    /* UART4 RS485 发送单字节 ASCII 命令给变频板 */
+                    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_SET);   /* TX模式 */
+                    HAL_UART_Transmit(&huart4, &cmd_char, 1, 100);
+                    while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET) {}
+                    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_12, GPIO_PIN_RESET); /* RX模式 */
 
-                /* 尝试接收变频板回传 (100ms超时) */
-                uint8_t rx_inv[16];
-                memset(rx_inv, 0, sizeof(rx_inv));
-                HAL_StatusTypeDef rx_st = HAL_UART_Receive(&huart4, rx_inv, 1, 100);
-
-                {
-                    char imsg[96];
-                    if (rx_st == HAL_OK) {
-                        sprintf(imsg, "[INV] TX:'%c' (%s) → RX:0x%02X('%c') OK\r\n",
-                                cmd_char, desc, rx_inv[0], rx_inv[0]);
-                    } else {
-                        sprintf(imsg, "[INV] TX:'%c' (%s) → RX:timeout (no echo)\r\n",
-                                cmd_char, desc);
+                    {
+                        char imsg[64];
+                        sprintf(imsg, "[INV] TX:'%c' (%s) sent\r\n", cmd_char, desc);
+                        BSP_RS485_SendString(imsg);
                     }
-                    BSP_RS485_SendString(imsg);
+                } else {
+                    char umsg[64];
+                    sprintf(umsg, "Unknown cmd: '%s'\r\n", rx_buffer);
+                    BSP_RS485_SendString(umsg);
                 }
-inv_done: ;
             }
 
             // 处理完毕，接收缓冲区清空，重新开始接收
