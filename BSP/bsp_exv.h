@@ -8,25 +8,31 @@
  *  三花 DPF(R04)1.5D-07 电子膨胀阀驱动 (DC12V, 单极4相8拍)
  *
  *  硬件接线 (V13 原理图 XH-5AW EXV0):
- *    PM0A (相A) = PD11
- *    PM0B (相B) = PD10
- *    PM0C (相C) = PD9
- *    PM0D (相D) = PD8
- *    COM        = +12V (硬件直连, 软件不控制)
+ *    PM0A (B-) = PD11   半绕组B-
+ *    PM0B (A-) = PD10   半绕组A-
+ *    PM0C (B)  = PD9    半绕组B
+ *    PM0D (A)  = PD8    半绕组A
+ *    COM       = +12V   (硬件直连, 软件不控制)
+ *
+ *  单极电机线圈结构:
+ *    COM ─┬─ 半绕组A  (PMXD/PD8)
+ *         ├─ 半绕组A- (PMXB/PD10)
+ *         ├─ 半绕组B  (PMXC/PD9)
+ *         └─ 半绕组B- (PMXA/PD11)
  *
  *  信号链: MCU GPIO -> TLP291-4 光耦 (U10) -> ULN2803A (U14) -> EXV0
  *  逻辑: GPIO LOW  = 线圈通电 (与继电器电路极性相同)
  *         GPIO HIGH = 线圈断电
  * =================================================================== */
 
-/* --- 引脚定义 --- */
-#define EXV0_PM0A_PORT   GPIOD          /* 相A  PD11 */
+/* --- 引脚定义 (与V13原理图一致) --- */
+#define EXV0_PM0A_PORT   GPIOD          /* B-  PD11  半绕组B- */
 #define EXV0_PM0A_PIN    GPIO_PIN_11
-#define EXV0_PM0B_PORT   GPIOD          /* 相B  PD10 */
+#define EXV0_PM0B_PORT   GPIOD          /* A-  PD10  半绕组A- */
 #define EXV0_PM0B_PIN    GPIO_PIN_10
-#define EXV0_PM0C_PORT   GPIOD          /* 相C  PD9  */
+#define EXV0_PM0C_PORT   GPIOD          /* B   PD9   半绕组B  */
 #define EXV0_PM0C_PIN    GPIO_PIN_9
-#define EXV0_PM0D_PORT   GPIOD          /* 相D  PD8  */
+#define EXV0_PM0D_PORT   GPIOD          /* A   PD8   半绕组A  */
 #define EXV0_PM0D_PIN    GPIO_PIN_8
 
 /* --- 步进参数 --- */
