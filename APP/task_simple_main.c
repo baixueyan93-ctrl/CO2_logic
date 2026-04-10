@@ -74,7 +74,6 @@ static uint32_t      s_state_sec        = 0;   /* 当前状态进入后的秒数
 static uint32_t      s_main_tick_sec    = 0;   /* 主节拍计数 (10s 重置)       */
 static uint32_t      s_defrost_tmr_sec  = 0;   /* 自动除霜累计计时 (3h 触发)  */
 static uint32_t      s_cooldown_sec     = 0;   /* 关机后冷却剩余秒数          */
-static uint8_t       s_gear             = 0;   /* 当前已发送的挡位 0/1/2/3    */
 static uint8_t       s_prev_system_on   = 0;   /* 上次读到的 g_system_on      */
 
 /* 对外: 除霜请求标志 (panel 按键置 1, simple main 消费后清零) */
@@ -120,7 +119,6 @@ static void SM_SetGear(uint8_t gear, const char *reason)
     if (gear > 3) gear = 3;
 
     BSP_Inverter_SendGear(gear);
-    s_gear = gear;
 
     SysState_Lock();
     SysState_GetRawPtr()->VAR_COMP_FREQ = (float)hz[gear];
@@ -156,7 +154,6 @@ static void SM_GotoPowerOff(uint8_t with_cooldown)
     s_state_sec     = 0;
     s_main_tick_sec = 0;
     s_cooldown_sec  = with_cooldown ? SIMPLE_COOLDOWN_SEC : 0;
-    s_gear          = 0;
 
     BSP_RS485_SendString(with_cooldown ?
         "[SM] -> POWER_OFF (cooldown 180s)\r\n" :
@@ -363,7 +360,6 @@ void Task_SimpleMain_Process(void const *argument)
     s_main_tick_sec  = 0;
     s_defrost_tmr_sec = 0;
     s_cooldown_sec   = 0;   /* 首次上电无冷却, 可立即开机 */
-    s_gear           = 0;
     s_prev_system_on = g_system_on ? 1 : 0;
 
     BSP_RS485_SendString(
