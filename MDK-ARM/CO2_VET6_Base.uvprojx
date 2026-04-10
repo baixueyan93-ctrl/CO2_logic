@@ -1331,6 +1331,11 @@
               <FileType>1</FileType>
               <FilePath>..\APP\task_exv.c</FilePath>
             </File>
+            <File>
+              <FileName>task_simple_main.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APP\task_simple_main.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1370,6 +1375,16 @@
               <FileName>bsp_exv.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\BSP\bsp_exv.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_relay.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\bsp_relay.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_inverter.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\bsp_inverter.c</FilePath>
             </File>
           </Files>
         </Group>

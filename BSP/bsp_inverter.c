@@ -1,47 +1,36 @@
 #include "bsp_inverter.h"
 #include "FreeRTOS.h"
+#include "task.h"
 #include "semphr.h"
 #include <string.h>
 
 /* ===================================================================
  *  变频器通信驱动 (UART4, PC10=TX, PC11=RX, RS485)
  *
- *  适配: 老师自研变频板 (自定义16字节协议, 9600bps)
+ *  简化版: ASCII 单字符协议 (9600bps, 8N1)
  *
- *  下行帧 (主控→变频板, 16字节):
- *    [0]  0x55        帧头
- *    [1]  CMD         0x00=停机, 0x01=启动, 0x02=调频
- *    [2]  FREQ_LO     频率低字节
- *    [3]  FREQ_HI     频率高字节
- *    [4~14] 0x00      保留
- *    [15] 0x56        帧尾
+ *    主控 → 变频板: 每次发送 1 字节 ASCII
+ *      'R' 启动, 'S' 停机, '0'~'3' 挡位切换
  *
- *  上行帧 (变频板→主控, 16字节):
- *    原样回传, 主控校验是否一致
- *
- *  频率编码: 小端序 uint16
- *    例: 258Hz → [2]=0x02(低), [3]=0x01(高)  (256+2=258)
- *    例: 120Hz → [2]=0x78(低), [3]=0x00(高)
- *    例: 320Hz → [2]=0x40(低), [3]=0x01(高)
+ *    本版本不做 echo 校验, 发出即认为成功.
  * =================================================================== */
 
 /* ===================================================================
  *  全局变量
  * =================================================================== */
-volatile uint8_t InvAckOK = 0;
+volatile uint8_t InvAckOK = 1;        /* 简化版总是认为成功 */
 InvStatus_t g_InvStatus = {0};
 
 /* ===================================================================
  *  内部变量
  * =================================================================== */
-static uint8_t s_tx_buf[INV_FRAME_LEN];
-static uint8_t s_rx_buf[INV_FRAME_LEN];
 
-/* 互斥锁: 防止多任务同时发送帧 (task_freq_exv / task_temp_ctrl / task_panel) */
+/* 互斥锁: 防止多任务同时调用 UART4 (simple_main / panel 按键等) */
 static SemaphoreHandle_t s_inv_mutex = NULL;
 
 /* ===================================================================
  *  RS485 方向控制 (PC12)
+ *    高 = 发送模式, 低 = 接收模式
  * =================================================================== */
 static void RS485_SetTx(void)
 {
@@ -54,141 +43,132 @@ static void RS485_SetRx(void)
 }
 
 /* ===================================================================
- *  组装16字节下行帧
- *
- *  cmd:     命令字节 (0x00/0x01/0x02)
- *  freq_hz: 频率值 (Hz), 小端序拆分到 byte[2](低) byte[3](高)
- * =================================================================== */
-static void BuildFrame(uint8_t cmd, uint16_t freq_hz)
-{
-    memset(s_tx_buf, 0x00, INV_FRAME_LEN);
-
-    s_tx_buf[INV_OFS_HEAD]    = INV_FRAME_HEAD;       /* 0x55 */
-    s_tx_buf[INV_OFS_CMD]     = cmd;
-    s_tx_buf[INV_OFS_FREQ_LO] = (uint8_t)(freq_hz & 0xFF);         /* 低字节 */
-    s_tx_buf[INV_OFS_FREQ_HI] = (uint8_t)((freq_hz >> 8) & 0xFF);  /* 高字节 */
-    s_tx_buf[INV_OFS_TAIL]    = INV_FRAME_TAIL;       /* 0x56 */
-}
-
-/* ===================================================================
- *  发送帧并等待echo回传, 校验一致性
- *
- *  返回: true = echo与发送一致, false = 超时或内容不一致
- * =================================================================== */
-static bool SendAndVerifyEcho(void)
-{
-    /* RS485 切发送模式 */
-    RS485_SetTx();
-
-    /* 发送16字节 */
-    HAL_UART_Transmit(&huart4, s_tx_buf, INV_FRAME_LEN, INV_COMM_TIMEOUT_MS);
-
-    /* 等待移位寄存器发完最后一个字节再切RX
-     * 9600bps下1字节≈1.04ms, 等2ms确保停止位发完 */
-    while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET) {}
-
-    /* 切回接收模式 */
-    RS485_SetRx();
-
-    /* 等待变频板回传16字节 */
-    memset(s_rx_buf, 0, INV_FRAME_LEN);
-    HAL_StatusTypeDef status = HAL_UART_Receive(&huart4, s_rx_buf, INV_FRAME_LEN,
-                                                 INV_COMM_TIMEOUT_MS);
-
-    if (status != HAL_OK) {
-        InvAckOK = 0;
-        g_InvStatus.echo_ok = false;
-        g_InvStatus.comm_ok = false;
-        g_InvStatus.fail_reason = 1;  /* 1=超时无回应 */
-        return false;
-    }
-
-    /* 校验: echo应与发送内容完全一致 */
-    if (memcmp(s_tx_buf, s_rx_buf, INV_FRAME_LEN) != 0) {
-        InvAckOK = 0;
-        g_InvStatus.echo_ok = false;
-        g_InvStatus.comm_ok = false;
-        g_InvStatus.fail_reason = 2;  /* 2=回传内容不一致 */
-        return false;
-    }
-
-    /* echo校验通过 */
-    InvAckOK = 1;
-    g_InvStatus.echo_ok = true;
-    g_InvStatus.comm_ok = true;
-    g_InvStatus.fail_reason = 0;
-    return true;
-}
-
-/* ===================================================================
  *  初始化
  * =================================================================== */
 void BSP_Inverter_Init(void)
 {
-    /* RS485 默认为接收模式 */
+    /* RS485 默认接收模式 */
     RS485_SetRx();
 
-    /* 使用阻塞式收发, 禁用UART4中断防止Overrun错误 */
+    /* 使用阻塞式收发, 禁用 UART4 中断避免 Overrun 错误 */
     HAL_NVIC_DisableIRQ(UART4_IRQn);
     __HAL_UART_DISABLE_IT(&huart4, UART_IT_RXNE);
     __HAL_UART_DISABLE_IT(&huart4, UART_IT_ERR);
 
     /* 清空状态 */
-    InvAckOK = 0;
+    InvAckOK = 1;
     memset(&g_InvStatus, 0, sizeof(g_InvStatus));
+    g_InvStatus.echo_ok   = true;
+    g_InvStatus.comm_ok   = true;
+    g_InvStatus.last_char = 0;
 
-    /* 创建互斥锁 (多任务调用BSP_Inverter_Send时保护共享缓冲区) */
+    /* 创建互斥锁 */
     if (s_inv_mutex == NULL) {
         s_inv_mutex = xSemaphoreCreateMutex();
     }
 }
 
 /* ===================================================================
- *  BSP_Inverter_Send — 变频器控制接口
+ *  BSP_Inverter_SendChar - 发送一个 ASCII 字符给变频板
  *
- *  组装16字节帧并发送, 等待echo校验
- *
- *  cmd:     0x00=停机, 0x01=启动, 0x02=调频
- *  freq_hz: 目标频率 (Hz)
- *           停机时 freq_hz=0
- *           启动时 freq_hz=120 (初始频率)
- *           调频时 freq_hz=目标值 (120~320)
+ *  步骤:
+ *    1. 互斥锁加锁 (防止多任务并发)
+ *    2. RS485 切到发送模式
+ *    3. HAL_UART_Transmit 发 1 字节
+ *    4. 等待 TC 标志 (最后一个字节发送完成)
+ *    5. RS485 切回接收模式
+ *    6. 解锁
  * =================================================================== */
-void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
+void BSP_Inverter_SendChar(char c)
 {
-    /* 上限保护 */
-    if (freq_hz > INV_FREQ_ABS_MAX) {
-        freq_hz = INV_FREQ_ABS_MAX;
-    }
+    uint8_t b = (uint8_t)c;
 
-    /* 加锁: 防止多任务同时操作RS485和共享缓冲区 */
     if (s_inv_mutex != NULL) {
         xSemaphoreTake(s_inv_mutex, portMAX_DELAY);
     }
 
-    /* 组帧 */
-    BuildFrame(cmd, freq_hz);
+    RS485_SetTx();
+    HAL_UART_Transmit(&huart4, &b, 1, 100);
 
-    /* 发送并校验echo */
-    bool ok = SendAndVerifyEcho();
+    /* 等发送寄存器空, 确保最后一位已经发送到线上 */
+    while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET) { }
 
-    /* 更新全局状态 */
-    g_InvStatus.last_cmd = cmd;
-    g_InvStatus.last_freq_hz = freq_hz;
+    RS485_SetRx();
 
-    /* 解锁 */
+    /* 更新状态 */
+    g_InvStatus.last_char = c;
+    g_InvStatus.echo_ok   = true;
+    g_InvStatus.comm_ok   = true;
+    g_InvStatus.fail_reason = 0;
+
     if (s_inv_mutex != NULL) {
         xSemaphoreGive(s_inv_mutex);
     }
-
-    (void)ok;
 }
 
 /* ===================================================================
- *  BSP_Inverter_ReadStatus — 读取变频器状态
+ *  简化版接口: 启动 / 停机 / 挡位
+ * =================================================================== */
+void BSP_Inverter_SendRun(void)
+{
+    BSP_Inverter_SendChar('R');
+    g_InvStatus.last_cmd = INV_CMD_START;
+}
+
+void BSP_Inverter_SendStop(void)
+{
+    BSP_Inverter_SendChar('S');
+    g_InvStatus.last_cmd     = INV_CMD_STOP;
+    g_InvStatus.last_freq_hz = 0;
+}
+
+void BSP_Inverter_SendGear(uint8_t gear)
+{
+    static const char     map[4] = {'0', '1', '2', '3'};
+    static const uint16_t hz[4]  = {80, 160, 240, 320};
+
+    if (gear > 3) gear = 3;
+
+    BSP_Inverter_SendChar(map[gear]);
+    g_InvStatus.last_cmd     = INV_CMD_SET_FREQ;
+    g_InvStatus.last_freq_hz = hz[gear];
+}
+
+/* ===================================================================
+ *  兼容旧接口: cmd + freq_hz → ASCII 字符
  *
- *  老师的变频板暂无主动状态回读功能,
- *  此函数返回最近一次通信的echo结果, 兼容上层调用
+ *  把 cmd/freq 转成最接近的挡位字符:
+ *    STOP          → 'S'
+ *    START         → 'R' + 稍等 + '0'
+ *    SET_FREQ 120~ → 根据 freq_hz 找最近挡位
+ * =================================================================== */
+void BSP_Inverter_Send(uint8_t cmd, uint16_t freq_hz)
+{
+    if (cmd == INV_CMD_STOP) {
+        BSP_Inverter_SendStop();
+        return;
+    }
+
+    if (cmd == INV_CMD_START) {
+        BSP_Inverter_SendRun();
+        vTaskDelay(pdMS_TO_TICKS(50));
+        BSP_Inverter_SendGear(INV_GEAR_LOW);
+        return;
+    }
+
+    if (cmd == INV_CMD_SET_FREQ) {
+        uint8_t gear;
+        if      (freq_hz >= 280) gear = INV_GEAR_HIGH;      /* 320Hz '3' */
+        else if (freq_hz >= 200) gear = INV_GEAR_MID_HIGH;  /* 240Hz '2' */
+        else if (freq_hz >= 120) gear = INV_GEAR_MID_LOW;   /* 160Hz '1' */
+        else                     gear = INV_GEAR_LOW;       /*  80Hz '0' */
+        BSP_Inverter_SendGear(gear);
+        return;
+    }
+}
+
+/* ===================================================================
+ *  状态读取 (兼容, 简化版无实际回读)
  * =================================================================== */
 bool BSP_Inverter_ReadStatus(InvStatus_t *out)
 {
@@ -201,14 +181,14 @@ bool BSP_Inverter_ReadStatus(InvStatus_t *out)
 /* ===================================================================
  *  UART 接收完成回调
  *
- *  UART4  = 变频器 — 当前使用阻塞式收发, 此回调仅作备用
- *  USART1 = RS485 调试串口 — 逐字节中断接收
+ *  UART4  = 变频器 (简化版阻塞式收发, 此回调不处理)
+ *  USART1 = RS485 调试串口 (逐字节中断接收)
  * =================================================================== */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == UART4)
     {
-        /* 变频器通信当前使用阻塞式, 暂不需要中断回调 */
+        /* 简化版变频器通信使用阻塞式, 此回调不处理 */
     }
     else if (huart->Instance == USART1)
     {

@@ -26,24 +26,19 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "task_led.h"        /* LED 指示灯任务 */
-//#include "task_buzzer.h"   /* 蜂鸣器任务 (暂未启用) */
-#include "task_panel.h"      /* 面板显示+按键任务 */
-#include "task_rs485_log.h"  /* RS485 通信/日志任务 */
-//#include "task_XKC_Y20_V.h" /* XKC_Y20_V 液位计任务 (暂未启用) */
-#include "task_adc.h"        /* ADC 采集任务 (NTC温度+压力) */
-#include "task_sht30.h"      /* SHT30 温湿度采集任务 */
-#include "task_exv.h"        /* 电子膨胀阀测试任务 (已由FreqExv替代) */
-#include "task_temp_ctrl.h"  /* 温度控制流程 (逻辑图1) */
-#include "task_defrost.h"    /* 除霜流程 (逻辑图2) */
-#include "task_evap_fan.h"   /* 蒸发风机(1控2)流程 (逻辑图3) */
-#include "task_freq_exv.h"   /* 变频控制(PID)+膨胀阀流程 (逻辑图4) */
-#include "task_timer_svc.h"  /* 定时中断服务 (逻辑图5) */
-#include "task_cond_fan.h"   /* 冷凝风机(1控3)流程 (逻辑图6) */
-#include "bsp_i2c_mutex.h"   /* I2C1 总线互斥锁 */
-#include "bsp_relay.h"       /* 6路继电器驱动 */
-#include "bsp_exv.h"         /* 电子膨胀阀驱动 */
-#include "sys_state.h"       /* 系统状态全局变量 */
+#include "task_led.h"          /* LED 指示灯任务 */
+//#include "task_buzzer.h"     /* 蜂鸣器任务 (暂未启用) */
+#include "task_panel.h"        /* 面板显示+按键任务 */
+#include "task_rs485_log.h"    /* RS485 通信/日志任务 */
+//#include "task_XKC_Y20_V.h"  /* XKC_Y20_V 液位计任务 (暂未启用) */
+#include "task_adc.h"          /* ADC 采集任务 (NTC温度+压力) */
+#include "task_sht30.h"        /* SHT30 温湿度采集任务 */
+#include "task_simple_main.h"  /* 简化测试版主状态机 (替代 TempCtrl/Defrost/EvapFan/FreqExv/CondFan/TimerSvc) */
+#include "bsp_i2c_mutex.h"     /* I2C1 总线互斥锁 */
+#include "bsp_relay.h"         /* 6路继电器驱动 */
+#include "bsp_exv.h"           /* 电子膨胀阀驱动 */
+#include "bsp_inverter.h"      /* 变频器 ASCII 驱动 */
+#include "sys_state.h"         /* 系统状态全局变量 */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -70,13 +65,7 @@ osThreadId Task_RS485Handle;
 osThreadId TaskPanelHandle;
 osThreadId Task_ADCHandle;
 osThreadId Task_SHT30Handle;
-osThreadId Task_EXVHandle;
-osThreadId Task_TempCtrlHandle;
-osThreadId Task_DefrostHandle;
-osThreadId Task_EvapFanHandle;
-osThreadId Task_FreqExvHandle;
-osThreadId Task_TimerSvcHandle;
-osThreadId Task_CondFanHandle;
+osThreadId Task_SimpleMainHandle;
 osMutexId EEPROM_MutexHandle;
 
 /* Private function prototypes -----------------------------------------------*/
@@ -89,13 +78,7 @@ void StartTask_RS485(void const * argument);
 void StartTask03(void const * argument);
 void StartTask_ADC(void const * argument);
 void StartTask_SHT30(void const * argument);
-void StartTask_EXV(void const * argument);
-void StartTask_TempCtrl(void const * argument);
-void StartTask_Defrost(void const * argument);
-void StartTask_EvapFan(void const * argument);
-void StartTask_FreqExv(void const * argument);
-void StartTask_TimerSvc(void const * argument);
-void StartTask_CondFan(void const * argument);
+void StartTask_SimpleMain(void const * argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -141,8 +124,9 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_MUTEX */
   BSP_I2C1_MutexInit();  /* 优先初始化硬件互斥锁 */
   BSP_Relay_Init();      /* 继电器GPIO初始化, 上电默认全部OFF */
-  BSP_EXV_Init();        /* 膨胀阀GPIO初始化 (Task_FreqExv暂停时由此处初始化) */
-  BSP_EXV_ResetToZero(); /* 膨胀阀归零 */
+  /* BSP_Inverter_Init() 已由 main.c 在 MX_UART4_Init() 之后调用 */
+  BSP_EXV_Init();        /* 膨胀阀GPIO初始化 */
+  BSP_EXV_ResetToZero(); /* 膨胀阀 560 步无记忆冷启动归零 */
   SysState_Init();       /* 在任务启动前初始化全局变量和系统锁 */
   /* USER CODE END RTOS_MUTEX */
 
@@ -181,30 +165,22 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_THREADS */
 
-  /* 定时中断服务任务 (逻辑图5, 高于普通优先级, 必须先启动, 其他任务依赖定时器) */
-  osThreadDef(Task_TimerSvc, StartTask_TimerSvc, osPriorityAboveNormal, 0, 256);
-  Task_TimerSvcHandle = osThreadCreate(osThread(Task_TimerSvc), NULL);
-
-  /* 温度控制主任务 (逻辑图1, 普通优先级, 512栈) */
-  osThreadDef(Task_TempCtrl, StartTask_TempCtrl, osPriorityNormal, 0, 512);
-  Task_TempCtrlHandle = osThreadCreate(osThread(Task_TempCtrl), NULL);
-
-  /* 除霜控制任务 (逻辑图2, 普通优先级, 512栈) */
-  osThreadDef(Task_Defrost, StartTask_Defrost, osPriorityNormal, 0, 512);
-  Task_DefrostHandle = osThreadCreate(osThread(Task_Defrost), NULL);
-
-  /* 蒸发风机(1控2)任务 (逻辑图3, 普通优先级, 256栈) */
-  osThreadDef(Task_EvapFan, StartTask_EvapFan, osPriorityNormal, 0, 256);
-  Task_EvapFanHandle = osThreadCreate(osThread(Task_EvapFan), NULL);
-
-  /* 变频控制(PID)+电子膨胀阀任务 (逻辑图4, 普通优先级, 512栈)
-   * 注: 变频板通信已改为ASCII手动控制(R/S/0~3), PID_SetFreq内16字节发送已禁用 */
-  osThreadDef(Task_FreqExv, StartTask_FreqExv, osPriorityNormal, 0, 512);
-  Task_FreqExvHandle = osThreadCreate(osThread(Task_FreqExv), NULL);
-
-  /* 冷凝风机(1控3)任务 (逻辑图6, 普通优先级, 256栈) */
-  osThreadDef(Task_CondFan, StartTask_CondFan, osPriorityNormal, 0, 256);
-  Task_CondFanHandle = osThreadCreate(osThread(Task_CondFan), NULL);
+  /* ============================================================================
+   * 简化测试版主状态机任务 (task_simple_main)
+   *
+   * 替代原 6 大逻辑任务:
+   *   Task_TempCtrl  (逻辑图1)  温度控制
+   *   Task_Defrost   (逻辑图2)  除霜控制
+   *   Task_EvapFan   (逻辑图3)  蒸发风机
+   *   Task_FreqExv   (逻辑图4)  变频 PID + 膨胀阀
+   *   Task_TimerSvc  (逻辑图5)  定时中断服务
+   *   Task_CondFan   (逻辑图6)  冷凝风机
+   *
+   * 内部 1 秒精准节拍 + 10 秒主节拍, 使用 ASCII 单字符控制变频板.
+   * 栈 1024, 普通优先级.
+   * ============================================================================ */
+  osThreadDef(Task_SimpleMain, StartTask_SimpleMain, osPriorityNormal, 0, 1024);
+  Task_SimpleMainHandle = osThreadCreate(osThread(Task_SimpleMain), NULL);
 
   /* USER CODE END RTOS_THREADS */
 
@@ -295,48 +271,11 @@ void StartTask_SHT30(void const * argument)
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
 
-/* ===== 6大逻辑任务入口 ===== */
-
-void StartTask_EXV(void const * argument)
+/* ===== 简化测试版主状态机任务入口 ===== */
+void StartTask_SimpleMain(void const * argument)
 {
-  Task_EXV_Process(argument);    /* 膨胀阀测试任务 (已由FreqExv替代) */
-  for(;;) { osDelay(1); }
-}
-
-void StartTask_TempCtrl(void const * argument)
-{
-  Task_TempCtrl_Process(argument);  /* 逻辑图1: 温度控制 */
-  for(;;) { osDelay(1); }
-}
-
-void StartTask_Defrost(void const * argument)
-{
-  Task_Defrost_Process(argument);   /* 逻辑图2: 除霜控制 */
-  for(;;) { osDelay(1); }
-}
-
-void StartTask_EvapFan(void const * argument)
-{
-  Task_EvapFan_Process(argument);   /* 逻辑图3: 蒸发风机(1控2) */
-  for(;;) { osDelay(1); }
-}
-
-void StartTask_FreqExv(void const * argument)
-{
-  Task_FreqExv_Process(argument);   /* 逻辑图4: 变频PID+膨胀阀 */
-  for(;;) { osDelay(1); }
-}
-
-void StartTask_TimerSvc(void const * argument)
-{
-  Task_TimerSvc_Process(argument);  /* 逻辑图5: 定时中断服务 */
-  for(;;) { osDelay(1); }
-}
-
-void StartTask_CondFan(void const * argument)
-{
-  Task_CondFan_Process(argument);   /* 逻辑图6: 冷凝风机(1控3) */
-  for(;;) { osDelay(1); }
+  Task_SimpleMain_Process(argument);
+  for(;;) { osDelay(1); }  /* 安全兜底 */
 }
 
 /* USER CODE END Application */

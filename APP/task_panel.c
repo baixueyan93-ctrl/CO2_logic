@@ -1,4 +1,5 @@
 #include "task_panel.h"
+#include "task_simple_main.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "event_groups.h"
@@ -16,10 +17,10 @@
 /* ===========================================================================
  * 面板操作全局变量
  * =========================================================================== */
-float   g_set_temp   = SET_TEMP_TS;  /* 用户设定温度, 默认跟随Ts */
-uint8_t g_panel_mode = 0;       /* 0: 正常监控, 1: 温度设置模式 */
-bool    g_light_on   = false;   /* 照明灯状态 */
-bool    g_system_on  = false;   /* 系统电源状态, 上电默认关 (需按键开机) */
+float         g_set_temp   = SET_TEMP_TS;  /* 用户设定温度, 默认跟随Ts */
+uint8_t       g_panel_mode = 0;     /* 0: 正常监控, 1: 温度设置模式 */
+bool          g_light_on   = false; /* 照明灯状态 */
+volatile bool g_system_on  = false; /* 系统电源状态, 上电默认关 (需按键开机) */
 
 static uint32_t s_set_mode_tick = 0;
 #define SET_MODE_TIMEOUT_MS  5000   /* 5秒无操作自动退出设置模式 */
@@ -145,20 +146,7 @@ void Task_Panel_Process(void const *argument)
                 if (g_set_temp < -50.0f) g_set_temp = -50.0f;
                 Panel_SaveSetTemp();  /* 每次调温后保存到EEPROM */
             }
-            else {
-                /* 正常模式下: 上/下调频率并发送 (用于调试) */
-                static uint16_t s_test_freq = 160;
-                if (key0 == KEY_CODE_UP)   { s_test_freq += 10; }
-                if (key0 == KEY_CODE_DOWN) { s_test_freq -= 10; }
-                if (s_test_freq > INV_FREQ_MAX) s_test_freq = INV_FREQ_MAX;
-                if (s_test_freq < INV_FREQ_MIN) s_test_freq = INV_FREQ_MIN;
-                /* BSP_Inverter_Send(0x02, s_test_freq); — 暂停, 变频板由ASCII手动控制 */
-                {
-                    char fm[64];
-                    sprintf(fm, "[KEY] FREQ:%dHz (not sent)\r\n", s_test_freq);
-                    BSP_RS485_SendString(fm);
-                }
-            }
+            /* 简化版: 正常模式下的上/下键屏蔽, 避免误操作变频板 */
             vTaskDelay(pdMS_TO_TICKS(150));  /* 消抖 */
         }
 
@@ -169,13 +157,13 @@ void Task_Panel_Process(void const *argument)
 
         if (key1 != 0x00 && key1 != 0xFF) {
             if (key1 == KEY_CODE_DEFROST) {
-                /* 一键除霜: 再按取消 */
-                if (sys_bits & ST_DEFROST_ACTIVE) {
-                    xEventGroupClearBits(SysEventGroup,
-                        ST_DEFROST_ACTIVE | ST_DEF_HEATING | ST_DEF_DRIPPING);
-                } else {
-                    xEventGroupSetBits(SysEventGroup, ST_DEFROST_ACTIVE);
-                }
+                /* 一键除霜:
+                 *   panel 仅置位 g_defrost_req, 由 task_simple_main 处理.
+                 *   RUN 状态按下 → 进入除霜
+                 *   DEFROST_RUN/DRIP 状态按下 → 取消除霜回 RUN_LOW
+                 *   POWER_OFF 状态按下 → simple_main 会自动清零, 忽略. */
+                g_defrost_req = 1;
+                BSP_RS485_SendString("[KEY] DEFROST req\r\n");
             }
             else if (key1 == KEY_CODE_LIGHT) {
                 /* 照明开关 */
@@ -186,21 +174,15 @@ void Task_Panel_Process(void const *argument)
                 /* 点检键: 预留, 后续进入日志模式 */
             }
             else if (key1 == KEY_CODE_POWER) {
-                /* 电源开关 */
+                /* 电源开关 (toggle)
+                 *   panel 仅做 "用户意图" 标志, 实际状态机由 task_simple_main 推进.
+                 *   关机 → simple_main 会发 'S' + 关风扇 + 启动 3min 冷却
+                 *   开机 → simple_main 会检查冷却是否结束, 然后进 SELFTEST */
                 g_system_on = !g_system_on;
                 if (g_system_on) {
-                    xEventGroupSetBits(SysEventGroup, ST_SYSTEM_ON);
-                    BSP_RS485_SendString("[KEY] Power ON\r\n");
-                    /* 不在这里直接发频率指令,
-                     * 由主逻辑 TempCtrl_CompressorStart() → Compressor_Start()
-                     * 统一走 WaitInverterReady() 等待变频器自检完成后再启动 */
+                    BSP_RS485_SendString("[KEY] Power ON req\r\n");
                 } else {
-                    /* BSP_Inverter_Send(0x00, 0); — 暂停, 变频板由ASCII手动控制 */
-                    BSP_RS485_SendString("[KEY] Power OFF (manual INV ctrl)\r\n");
-                    xEventGroupClearBits(SysEventGroup, ST_SYSTEM_ON);
-                    xEventGroupClearBits(SysEventGroup, ST_COMP_RUNNING);
-                    xEventGroupClearBits(SysEventGroup, ST_WARMUP_DONE);  /* 重置热车, 下次开机要重新校准 */
-                    xEventGroupSetBits(SysEventGroup, ST_FIRST_RUN);      /* 重置首次运行, 重新等C3 */
+                    BSP_RS485_SendString("[KEY] Power OFF req\r\n");
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(150));  /* 消抖 */

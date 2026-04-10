@@ -1,6 +1,8 @@
 #ifndef __TASK_PANEL_H
 #define __TASK_PANEL_H
 
+#include <stdbool.h>
+
 /* ===========================================================================
  * 面板总任务 — 一个任务同时驱动 PANEL0 + PANEL1
  *
@@ -14,7 +16,8 @@
  *   - 8按键: Reset/Set/Up/Down/Defrost/Light/Inspect/Power
  * =========================================================================== */
 
-extern float g_set_temp;   /* 面板可调的设定温度 (运行时Ts) */
+extern float         g_set_temp;    /* 面板可调的设定温度 (运行时Ts)     */
+extern volatile bool g_system_on;   /* 系统电源状态 (POWER 键切换)       */
 
 void Task_Panel_Process(void const *argument);
 

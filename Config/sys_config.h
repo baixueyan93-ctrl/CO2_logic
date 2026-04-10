@@ -116,6 +116,45 @@ typedef struct {
 #define EEPROM_INDEX_ADDR   0x0000
 #define EEPROM_DATA_START   0x0010
 
+/* ===================================================================
+ *  简化测试模式 (SIMPLE_MODE) 常量
+ *  — 用于 task_simple_main.c 的最简运行流程
+ *
+ *  流程:
+ *    上电 → 显示柜温 (EXV 已 560 步关零) → 等待开机键
+ *    → 按开机键 → 10s 变频板自检 + 开风扇 + 启ADC
+ *    → 发 'R' 启动 → 发 '0' 进 80Hz
+ *    → 每 10s 主节拍: 温差换挡 + EXV PID 调整
+ *    → 3h 自动除霜 (或手动除霜键)
+ *    → 除霜: 发 '2' 240Hz + EXV 全开 + 关风扇, 持续 10min
+ *    → 停机 + 滴水 5min → 重启回 RUN_LOW
+ *    → 任意 RUN 状态按关机键: 停机 + 风扇关 + 3min 冷却保护
+ * =================================================================== */
+
+/* --- 状态定时 --- */
+#define SIMPLE_SELFTEST_SEC     10         /* 开机后变频板自检时间 (秒)     */
+#define SIMPLE_COOLDOWN_SEC     180        /* 关机后再开机保护 (秒, 3分钟)   */
+#define SIMPLE_MAIN_TICK_SEC    10         /* 主节拍周期 (秒)                */
+
+/* --- 温差换挡阈值 (带 ±0.5℃ 滞环, 防边界抖动) --- */
+#define SIMPLE_DT_UP_TH         5.5f       /* ΔT ≥ 此值 → 升到 160Hz 高档   */
+#define SIMPLE_DT_DOWN_TH       4.5f       /* ΔT ≤ 此值 → 降回 80Hz  低档   */
+
+/* --- EXV 过热度 PID (简化版, 纯 P 控制) --- */
+#define SIMPLE_SH_TARGET        7.0f       /* 目标过热度 (℃)                */
+#define SIMPLE_SH_DEADBAND      0.5f       /* 死区 ±0.5℃ (6.5~7.5 不动)    */
+#define SIMPLE_EXV_KP           0.5f       /* 比例系数                      */
+
+/* --- 除霜计时 --- */
+#define SIMPLE_DEF_AUTO_SEC     (3 * 3600) /* 自动除霜间隔 (秒, 3 小时)      */
+#define SIMPLE_DEF_RUN_SEC      (10 * 60)  /* 除霜持续时间 (秒, 10 分钟)     */
+#define SIMPLE_DEF_DRIP_SEC     (5 * 60)   /* 滴水时间 (秒, 5 分钟)          */
+
+/* --- 变频板挡位编号 (与 bsp_inverter.h INV_GEAR_xxx 对应) --- */
+#define SIMPLE_GEAR_RUN_LOW     0          /* '0' 80Hz  (1200 rpm)          */
+#define SIMPLE_GEAR_RUN_HIGH    1          /* '1' 160Hz (2400 rpm)          */
+#define SIMPLE_GEAR_DEFROST     2          /* '2' 240Hz (3600 rpm)          */
+
 #endif /* SYS_CONFIG_H */
 
 
